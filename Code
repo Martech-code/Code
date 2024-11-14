@@ -242,42 +242,6 @@ def convert_members_count(count_text):
         return int(count_text.replace(',', ''))
     except:
         return 0
-		
-	def check_page_status(self, timeout=60):
-    """
-    Kiểm tra trạng thái tải trang và tự động tải lại nếu bị đứng
-    """
-    start_time = time.time()
-    while True:
-        current_time = time.time()
-        if current_time - start_time > timeout:
-            print(f"[Worker {self.worker_id}] Trang đang bị đứng, đang tải lại...")
-            try:
-                current_url = self.driver.current_url
-                self.driver.refresh()
-                time.sleep(3)
-                return True
-            except Exception as e:
-                print(f"[Worker {self.worker_id}] Lỗi khi tải lại trang: {str(e)}")
-                return False
-                
-        try:
-            # Kiểm tra xem page có đang ready
-            page_state = self.driver.execute_script('return document.readyState;')
-            if page_state == 'complete':
-                return True
-                
-            # Kiểm tra lỗi Out of Memory
-            if "Out Of Memory" in self.driver.page_source:
-                print(f"[Worker {self.worker_id}] Phát hiện lỗi Out Of Memory, đang tải lại trang...")
-                self.driver.refresh()
-                time.sleep(3)
-                return True
-                
-        except Exception as e:
-            print(f"[Worker {self.worker_id}] Lỗi khi kiểm tra trạng thái: {str(e)}")
-            
-        time.sleep(1)
 
 def process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count=0):
     print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm: {group_url}")
@@ -285,15 +249,53 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
         chrome_instance.driver.get(group_url)
         time.sleep(random.uniform(2, 3))
 		
-		# Thêm kiểm tra trạng thái tải trang
-        if not chrome_instance.check_page_status():
+        
+        # Thêm hàm check_page_status vào đây
+        def check_page_status(timeout=120):
+            """
+            Kiểm tra trạng thái tải trang và tự động tải lại nếu bị đứng
+            """
+            start_time = time.time()
+            while True:
+                current_time = time.time()
+                if current_time - start_time > timeout:
+                    print(f"[Worker {chrome_instance.worker_id}] Trang đang bị đứng, đang tải lại...")
+                    try:
+                        current_url = chrome_instance.driver.current_url
+                        chrome_instance.driver.refresh()
+                        time.sleep(3)
+                        return True
+                    except Exception as e:
+                        print(f"[Worker {chrome_instance.worker_id}] Lỗi khi tải lại trang: {str(e)}")
+                        return False
+                
+                try:
+                    # Kiểm tra xem page có đang ready
+                    page_state = chrome_instance.driver.execute_script('return document.readyState;')
+                    if page_state == 'complete':
+                        return True
+                    
+                    # Kiểm tra lỗi Out of Memory
+                    if "Out Of Memory" in chrome_instance.driver.page_source:
+                        print(f"[Worker {chrome_instance.worker_id}] Phát hiện lỗi Out Of Memory, đang tải lại trang...")
+                        chrome_instance.driver.refresh()
+                        time.sleep(3)
+                        return True
+                    
+                except Exception as e:
+                    print(f"[Worker {chrome_instance.worker_id}] Lỗi khi kiểm tra trạng thái: {str(e)}")
+                    
+                time.sleep(1)
+
+        # Gọi hàm check_page_status trước khi xử lý dữ liệu của nhóm
+        if not check_page_status():
             if retry_count < MAX_RETRIES:
                 print(f"[Worker {chrome_instance.worker_id}] Tải lại trang và thử lại...")
                 time.sleep(random.uniform(1, 2))
                 return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
             else:
                 raise Exception("Không thể tải trang sau nhiều lần thử")
-		
+        
 		# Thêm xử lý popup block
         if chrome_instance.close_block_popup():
             print(f"[Worker {chrome_instance.worker_id}] Đã đóng popup block")
@@ -428,11 +430,6 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                 print(f"\n[Worker {chrome_instance.worker_id}] Tìm kiếm với từ khóa: {search_keywords}")
                 driver.get(search_url)
                 time.sleep(random.uniform(2, 3))
-				
-				# Thêm kiểm tra trạng thái tải trang
-                if not chrome_instance.check_page_status():
-                    print(f"[Worker {chrome_instance.worker_id}] Trang tìm kiếm bị lỗi, thử lại...")
-                    continue
 
                 # Thu thập URLs với tracking
                 group_urls = chrome_instance.scroll_and_collect_groups()
