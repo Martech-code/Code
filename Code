@@ -213,6 +213,30 @@ def save_failed_urls(failed_urls, output_dir, worker_id):
     except Exception as e:
         print(f"Error saving failed URLs: {str(e)}")
 
+def save_processing_state(worker_id, keyword, urls, last_processed_index, output_dir):
+    state_file = os.path.join(output_dir, f'processing_state_worker_{worker_id}.json')
+    state = {
+        'keyword': keyword,
+        'urls': urls,
+        'last_processed_index': last_processed_index,
+        'timestamp': datetime.now().isoformat()
+    }
+    try:
+        with open(state_file, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Worker {worker_id}] Lỗi lưu trạng thái: {str(e)}")
+        
+def load_processing_state(worker_id, output_dir):
+    state_file = os.path.join(output_dir, f'processing_state_worker_{worker_id}.json')
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[Worker {worker_id}] Lỗi đọc trạng thái: {str(e)}")
+    return None
+
 def convert_members_count(count_text):
     try:
         # Remove "thành viên", "members" text
@@ -350,6 +374,35 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
         output_file = os.path.join(output_dir, 'groups_data.csv')
         retry_count = 0
 
+        # Kiểm tra tiến độ cũ
+        progress = chrome_instance.load_progress(output_dir)
+        if progress:
+            print(f"[Worker {chrome_instance.worker_id}] Tìm thấy tiến độ cũ, tiếp tục từ URL thứ {progress['current_index']}")
+            search_keywords = progress['keyword']
+            urls_to_process = progress['urls']
+            start_index = progress['current_index']
+            
+            # Xử lý các URL còn lại từ tiến độ cũ
+            for i in range(start_index, len(urls_to_process)):
+                url = urls_to_process[i]
+                if url in processed_groups:
+                    continue
+                
+                success = process_single_group(chrome_instance, url, search_keywords, output_file, lock)
+                if success:
+                    processed_groups.add(url)
+                
+                # Lưu tiến độ sau mỗi URL
+                chrome_instance.save_progress(search_keywords, urls_to_process, i + 1, output_dir)
+                
+                if chrome_instance.is_checkpoint or chrome_instance.is_blocked:
+                    return
+                
+                time.sleep(random.uniform(MIN_DELAY_BETWEEN_REQUESTS, MAX_DELAY_BETWEEN_REQUESTS))
+            
+            # Xóa file tiến độ khi đã xử lý xong
+            chrome_instance.clear_progress(output_dir)
+
         while True:
             if chrome_instance.check_checkpoint():
                 chrome_instance.is_checkpoint = True
@@ -360,8 +413,7 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                 chrome_instance.is_blocked = True
                 print(f"[Worker {chrome_instance.worker_id}] Tài khoản bị chặn tạm thời, dừng worker")
                 break
-				
-			# Thêm kiểm tra suspicious
+
             if chrome_instance.check_suspicious():
                 print(f"[Worker {chrome_instance.worker_id}] Đã xử lý cảnh báo suspicious")
                 time.sleep(random.uniform(1, 2))
@@ -390,8 +442,9 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                     print(f"[Worker {chrome_instance.worker_id}] Không tìm thấy URLs cho từ khóa: {search_keywords}")
                     continue
 
-                # Lưu URLs đã thu thập
+                # Lưu URLs đã thu thập và tiến độ mới
                 save_group_urls(group_urls, search_keywords, output_dir, chrome_instance.worker_id)
+                chrome_instance.save_progress(search_keywords, group_urls, 0, output_dir)
 
                 # Tracking progress
                 total_urls = len(group_urls)
@@ -407,7 +460,8 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
 
                     print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm {idx}/{total_urls}")
                     
-                    if process_single_group(chrome_instance, group_url, search_keywords, output_file, lock):
+                    success = process_single_group(chrome_instance, group_url, search_keywords, output_file, lock)
+                    if success:
                         with lock:
                             processed_groups.add(group_url)
                             chrome_instance.processed_groups.add(group_url)
@@ -415,12 +469,21 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                     else:
                         failed_urls += 1
 
+                    # Cập nhật tiến độ
+                    chrome_instance.save_progress(search_keywords, group_urls, idx, output_dir)
+
+                    if chrome_instance.is_checkpoint or chrome_instance.is_blocked:
+                        return
+
                     time.sleep(random.uniform(MIN_DELAY_BETWEEN_REQUESTS, MAX_DELAY_BETWEEN_REQUESTS))
 
                 print(f"[Worker {chrome_instance.worker_id}] Kết quả xử lý keyword '{search_keywords}':")
                 print(f"- Tổng số URLs: {total_urls}")
                 print(f"- Đã xử lý: {processed_urls}")
                 print(f"- Thất bại: {failed_urls}")
+
+                # Xóa file tiến độ khi hoàn thành
+                chrome_instance.clear_progress(output_dir)
 
                 chrome_instance.processed_count += 1
                 with lock:
