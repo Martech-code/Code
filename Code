@@ -47,6 +47,7 @@ class ChromeInstance:
         self.processed_groups = set()
         self.collected_urls = []
         self.failed_urls = []
+        self.load_progress = 0
 
     def setup_chrome_driver(self):
         chrome_options = Options()
@@ -527,8 +528,8 @@ def save_progress(processed_items, processed_groups, output_dir):
         }, f)
 
 def main():
-    input_file = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\output'
+    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
+    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
 
