@@ -2,8 +2,6 @@ import time
 from datetime import datetime
 import random
 import json
-import csv
-import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -13,40 +11,31 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchWindowException
 from collections import defaultdict, deque
 from typing import Dict, List
-from selenium.webdriver.common.action_chains import ActionChains
 import os
 import threading
-import math
+from selenium.webdriver.common.action_chains import ActionChains
 
+# Đường dẫn file
+uid_list_file = 'D:\\Code Python\\check_groups\\uid_list.txt'
+output_dir = 'D:\\Code Python\\check_groups'
 
-# Configuration parameters
-MIN_DELAY_BETWEEN_REQUESTS = 0.5
-MAX_DELAY_BETWEEN_REQUESTS = 1
+# Các thông số cấu hình
+MIN_DELAY_BETWEEN_REQUESTS = 0.2
+MAX_DELAY_BETWEEN_REQUESTS = 0.5
 MAX_RETRIES = 3
-PAGE_LOAD_TIMEOUT = 10
+PAGE_LOAD_TIMEOUT = 6
+MAX_PARALLEL_TABS = 15
 TAB_SWITCH_DELAY = 0.2
-MAX_TABS = 5
-SCROLL_PAUSE_TIME = 2
-
-def calculate_std_dev(values):
-    n = len(values)
-    if n < 2:
-        return 0
-    mean = sum(values) / n
-    squared_diff_sum = sum((x - mean) ** 2 for x in values)
-    return math.sqrt(squared_diff_sum / (n - 1))
 
 class ChromeInstance:
     def __init__(self, debug_port, worker_id):
         self.debug_port = debug_port
         self.worker_id = worker_id
         self.driver = None
+        self.tab_manager = None
         self.processed_count = 0
         self.is_checkpoint = False
         self.is_blocked = False
-        self.processed_groups = set()
-        self.collected_urls = []
-        self.failed_urls = []
 
     def setup_chrome_driver(self):
         chrome_options = Options()
@@ -65,27 +54,35 @@ class ChromeInstance:
             service = Service()
             self.driver = webdriver.Chrome(service=service, options=options)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+            self.tab_manager = TabManager(self.driver)
             return self.driver
         except Exception as e:
             raise Exception(f"Lỗi khởi tạo Chrome WebDriver port {self.debug_port}: {str(e)}")
 
-    def close_block_popup(self):
+    def check_suspicious(self):
         try:
-            popup = self.driver.find_element(By.XPATH, "//div[contains(@class, 'x1ey2m1c') and contains(@class, 'xds687c') and contains(@class, 'x17qophe') and contains(@class, 'xg01cxk') and contains(@class, 'x47corl') and contains(@class, 'x10l6tqk') and contains(@class, 'x13vifvy') and contains(@class, 'x1ebt8du') and contains(@class, 'x19991ni') and contains(@class, 'x1dhq9h') and contains(@class, 'xzolkzo') and contains(@class, 'x12go9s9') and contains(@class, 'x1rnf11y') and contains(@class, 'xprq8jg')]")
-            actions = ActionChains(self.driver)
-            actions.double_click(popup).perform()
-            time.sleep(1)
-            return True
+            current_url = self.driver.current_url.lower()
+            if "facebook.com/checkpoint/601051028565049" in current_url:
+                # Tìm và nhấp vào nút "Bỏ qua" hoặc "Dismiss"
+                skip_button = self.driver.find_elements(By.XPATH, "//span[contains(@class, 'x1lliihq') and contains(@class, 'x6ikm8r') and contains(@class, 'x10wlt62') and contains(@class, 'x1n2onr6') and contains(@class, 'xlyipyv') and contains(@class, 'xuxw1ft') and (contains(text(), 'Bỏ qua') or contains(text(), 'Dismiss'))]")
+                if skip_button:
+                    actions = ActionChains(self.driver)
+                    actions.double_click(skip_button[0]).perform()
+                    time.sleep(1)  # Chờ sau khi nhấp
+                    return True
+            return False
         except:
             return False
 
     def check_checkpoint(self):
         try:
             current_url = self.driver.current_url.lower()
+            if "facebook.com/checkpoint/601051028565049" in current_url:
+                return False
             checkpoint_indicators = [
                 "facebook.com/checkpoint",
                 "facebook.com/recover",
-                "facebook.com/login",
+                "facebook.com/login", 
                 "/login/?next",
                 "checkpoint/?next"
             ]
@@ -95,432 +92,230 @@ class ChromeInstance:
 
     def check_blocked(self):
         try:
-            blocked_text = "Bạn tạm thời bị chặn"
-            blocked_text_2 = "Có vẻ như bạn đang dùng nhầm tính năng này do sử dụng quá nhanh"
+            # Kiểm tra text thông báo bị chặn - cả tiếng Việt và tiếng Anh
+            blocked_texts = [
+                "Bạn tạm thời bị chặn",
+                "You're Temporarily Blocked",
+                "Có vẻ như bạn đang dùng nhầm tính năng này do sử dụng quá nhanh",
+                "It looks like you were misusing this feature by going too fast. You've been temporarily blocked from using it."
+            ]
+
+            # Kiểm tra phần tử HTML reload button - cả tiếng Việt và tiếng Anh  
+            reload_button = self.driver.find_elements(By.XPATH, "//span[contains(@class, 'x1lliihq') and contains(@class, 'x6ikm8r') and contains(@class, 'x10wlt62') and contains(@class, 'x1n2onr6') and contains(@class, 'xlyipyv') and contains(@class, 'xuxw1ft') and (contains(text(), 'Tải lại trang') or contains(text(), 'Reload Page'))]")
+
             page_source = self.driver.page_source
-            return blocked_text in page_source or blocked_text_2 in page_source
+            text_check = any(text in page_source for text in blocked_texts)
+            button_check = len(reload_button) > 0
+
+            return text_check and button_check
         except:
             return False
 
-    def check_suspicious(self):
+def check_group_status(driver) -> bool:
+    error_messages = [
+        "bạn hiện không xem được nội dung này",
+        "lỗi này thường do chủ sở hữu chỉ chia sẻ nội dung với một nhóm nhỏ",
+        "this content isn't available",
+        "when this happens, it's usually because the owner only shared it",
+        "content not found",
+        "đã xóa nội dung",
+        "you must log in to continue"
+    ]
+    
+    page_source = driver.page_source.lower()
+    title = driver.title.lower()
+
+    content_check = any(error_msg in page_source for error_msg in error_messages)
+    title_check = title == "facebook" or "(15) facebook" in title
+
+    return content_check or title_check
+
+class TabManager:
+    def __init__(self, driver):
+        self.driver = driver
+        self.tabs = []
+        self.main_window = driver.current_window_handle
+
+    def open_new_tab(self, group_id: str):
         try:
-            current_url = self.driver.current_url.lower()
-            if "facebook.com/checkpoint/601051028565049" in current_url:
-                skip_button = self.driver.find_elements(By.XPATH, "//span[contains(@class, 'x1lliihq') and contains(@class, 'x6ikm8r') and contains(@class, 'x10wlt62') and contains(@class, 'x1n2onr6') and contains(@class, 'xlyipyv') and contains(@class, 'xuxw1ft') and (contains(text(), 'Bỏ qua') or contains(text(), 'Dismiss'))]")
-                if skip_button:
-                    actions = ActionChains(self.driver)
-                    actions.double_click(skip_button[0]).perform()
-                    time.sleep(1)
-                    return True
-            return False
-        except:
-            return False
+            self.driver.execute_script("window.open('about:blank', '_blank');")
+            time.sleep(TAB_SWITCH_DELAY)
+            new_tab = self.driver.window_handles[-1]
+            self.driver.switch_to.window(new_tab)
 
-    def scroll_and_collect_groups(self):
-        print(f"[Worker {self.worker_id}] Bắt đầu scroll và thu thập URLs...")
-        group_links = set()
-        no_new_content_count = 0
-        previous_content_length = 0
-        last_height = self.driver.execute_script("return document.documentElement.scrollHeight")
-        
-        while True:
-            # Scroll xuống
-            current_height = self.driver.execute_script("return window.pageYOffset")
-            target_height = min(current_height + 300, last_height)
-            self.driver.execute_script(f"window.scrollTo(0, {target_height});")
-            time.sleep(0.3)
-
-            # Đợi để trang load thêm nội dung
-            time.sleep(SCROLL_PAUSE_TIME)
-            
-            # Kiểm tra vị trí scroll hiện tại
-            actual_height = self.driver.execute_script("return window.pageYOffset")
-            if abs(actual_height - target_height) > 50:  # Nếu vị trí scroll bị nhảy
-                self.driver.execute_script(f"window.scrollTo(0, {target_height});")
-                time.sleep(0.3)
-
-            # Thu thập URLs
-            elements = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/groups/']")
-            current_content_length = len(elements)
-            
-            print(f"[Worker {self.worker_id}] Đã tìm thấy {current_content_length} nhóm...")
-            
-            for element in elements:
-                try:
-                    href = element.get_attribute('href')
-                    if href and re.search(r'facebook\.com/groups/\d+/?$', href):
-                        clean_url = re.sub(r'\?.*$', '', href)
-                        if clean_url not in self.processed_groups:
-                            group_links.add(clean_url)
-                except:
-                    continue
-
-            # Kiểm tra xem có nội dung mới không
-            if current_content_length == previous_content_length:
-                no_new_content_count += 1
-                print(f"[Worker {self.worker_id}] Không tìm thấy nội dung mới... ({no_new_content_count}/8)")
-                if no_new_content_count >= 8:
-                    print(f"[Worker {self.worker_id}] Hoàn tất thu thập URLs sau 8 lần không có nội dung mới")
-                    break
-            else:
-                no_new_content_count = 0
-                previous_content_length = current_content_length
-
-            # Cập nhật chiều cao trang mới
-            new_height = self.driver.execute_script("return document.documentElement.scrollHeight")
-            if new_height != last_height:
-                last_height = new_height
-                no_new_content_count = 0
-            elif abs(actual_height - last_height) < 100:
-                time.sleep(SCROLL_PAUSE_TIME * 2)
-                if abs(actual_height - self.driver.execute_script("return document.documentElement.scrollHeight")) < 100:
-                    print(f"[Worker {self.worker_id}] Đã đến cuối trang")
-                    break
-
-        print(f"[Worker {self.worker_id}] Tổng cộng đã thu thập được {len(group_links)} URLs độc nhất")
-        return list(group_links)
-
-def save_group_urls(urls, keyword, output_dir, worker_id):
-    file_path = os.path.join(output_dir, f'collected_urls_worker_{worker_id}.json')
-    data = {
-        'keyword': keyword,
-        'timestamp': datetime.now().isoformat(),
-        'urls': urls
-    }
-
-    try:
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                existing_data = json.load(f)
-                if not isinstance(existing_data, list):
-                    existing_data = [existing_data]
-        else:
-            existing_data = []
-            
-        existing_data.append(data)
-        
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(existing_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Error saving URLs to JSON: {str(e)}")
-
-def save_failed_urls(failed_urls, output_dir, worker_id):
-    file_path = os.path.join(output_dir, f'failed_urls_worker_{worker_id}.json')
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(failed_urls, f, ensure_ascii=False, indent=2)
-        print(f"[Worker {worker_id}] Đã lưu {len(failed_urls)} URLs thất bại vào file")
-    except Exception as e:
-        print(f"Error saving failed URLs: {str(e)}")
-
-def convert_members_count(count_text):
-    try:
-        # Remove "thành viên", "members" text
-        count_text = count_text.lower().replace('thành viên', '').replace('members', '').strip()
-        
-        # Handle "triệu" (Vietnamese millions)
-        if 'triệu' in count_text.lower():
-            number = float(count_text.lower().replace('triệu', '').replace(',', '.').strip())
-            return int(number * 1000000)
-        
-        # Handle K (thousands)
-        if 'k' in count_text.lower():
-            number = float(count_text.lower().replace('k', '').replace(',', '.'))
-            return int(number * 1000)
-        
-        # Handle M (millions) 
-        if 'm' in count_text.lower():
-            number = float(count_text.lower().replace('m', '').replace(',', '.'))
-            return int(number * 1000000)
-            
-        # Handle B (billions)
-        if 'b' in count_text.lower():
-            number = float(count_text.lower().replace('b', '').replace(',', '.'))
-            return int(number * 1000000000)
-            
-        # Handle regular numbers
-        return int(count_text.replace(',', ''))
-    except:
-        return 0
-
-def process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count=0):
-    print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm: {group_url}")
-    try:
-        chrome_instance.driver.get(group_url)
-        time.sleep(random.uniform(2, 3))
-		
-        
-        # Thêm hàm check_page_status vào đây
-        def check_page_status(timeout=120):
-            """
-            Kiểm tra trạng thái tải trang và tự động tải lại nếu bị đứng
-            """
-            start_time = time.time()
-            while True:
-                current_time = time.time()
-                if current_time - start_time > timeout:
-                    print(f"[Worker {chrome_instance.worker_id}] Trang đang bị đứng, đang tải lại...")
-                    try:
-                        current_url = chrome_instance.driver.current_url
-                        chrome_instance.driver.refresh()
-                        time.sleep(3)
-                        return True
-                    except Exception as e:
-                        print(f"[Worker {chrome_instance.worker_id}] Lỗi khi tải lại trang: {str(e)}")
-                        return False
-                
-                try:
-                    # Kiểm tra xem page có đang ready
-                    page_state = chrome_instance.driver.execute_script('return document.readyState;')
-                    if page_state == 'complete':
-                        return True
-                    
-                    # Kiểm tra lỗi Out of Memory
-                    if "Out Of Memory" in chrome_instance.driver.page_source:
-                        print(f"[Worker {chrome_instance.worker_id}] Phát hiện lỗi Out Of Memory, đang tải lại trang...")
-                        chrome_instance.driver.refresh()
-                        time.sleep(3)
-                        return True
-                    
-                except Exception as e:
-                    print(f"[Worker {chrome_instance.worker_id}] Lỗi khi kiểm tra trạng thái: {str(e)}")
-                    
-                time.sleep(1)
-
-        # Gọi hàm check_page_status trước khi xử lý dữ liệu của nhóm
-        if not check_page_status():
-            if retry_count < MAX_RETRIES:
-                print(f"[Worker {chrome_instance.worker_id}] Tải lại trang và thử lại...")
-                time.sleep(random.uniform(1, 2))
-                return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-            else:
-                raise Exception("Không thể tải trang sau nhiều lần thử")
-        
-		# Thêm xử lý popup block
-        if chrome_instance.close_block_popup():
-            print(f"[Worker {chrome_instance.worker_id}] Đã đóng popup block")
-            time.sleep(random.uniform(1, 2))
-
-
-        # Check if page loaded properly
-        if "content not found" in chrome_instance.driver.page_source.lower() or "không tìm thấy nội dung" in chrome_instance.driver.page_source.lower():
-            if retry_count < MAX_RETRIES:
-                time.sleep(random.uniform(1, 3))
-                return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-            else:
-                raise Exception("Không thể tải trang sau nhiều lần thử")
-
-        # Get group name with explicit wait and retry
-        try:
-            group_name_element = WebDriverWait(chrome_instance.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, "//h1//a[contains(@class, 'x16tdsg8')]"))
-            )
-            group_name = group_name_element.text.strip()
-        except:
-            if retry_count < MAX_RETRIES:
-                time.sleep(random.uniform(1, 2))
-                return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-            else:
-                raise Exception("Không thể lấy tên nhóm")
-
-        # Get group type with retry
-        try:
-            group_type_element = WebDriverWait(chrome_instance.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Nhóm') and contains(@class, 'x1n2onr6')]"))
-            )
-            group_type = group_type_element.text.strip()
-        except:
-            group_type = "Unknown"
-
-        # Get members count with retry
-        try:
-            members_element = WebDriverWait(chrome_instance.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/members/')]"))
-            )
-            members_text = members_element.text
-            members_match = re.search(r'([\d,\.]+[KMB]?) thành viên', members_text)
-            members_count = members_match.group(1) if members_match else "0"
-        except:
-            if retry_count < MAX_RETRIES:
-                time.sleep(random.uniform(1, 2))
-                return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-            else:
-                raise Exception("Không thể lấy số lượng thành viên")
-
-        # Convert members count to actual number
-        numeric_members_count = convert_members_count(members_count)
-
-        # Random scroll 3-6 times
-        num_scrolls = random.randint(3, 6)
-        for _ in range(num_scrolls):
-            chrome_instance.driver.execute_script("window.scrollBy(0, 600)")
-            time.sleep(random.uniform(0.5, 1))
-
-        group_data = {
-            'keyword_search': search_keywords,
-            'group_name': group_name,
-            'group_link': group_url,
-            'group_type': group_type,
-            'members_count': numeric_members_count
-        }
-
-        # Save with lock and verification
-        with lock:
             try:
-                write_header = not os.path.exists(output_file)
-                with open(output_file, 'a', newline='', encoding='utf-8-sig') as f:
-                    writer = csv.DictWriter(f, fieldnames=list(group_data.keys()))
-                    if write_header:
-                        writer.writeheader()
-                    writer.writerow(group_data)
-                print(f"[Worker {chrome_instance.worker_id}] Đã lưu thành công nhóm: {group_name}")
+                self.driver.get(f"https://www.facebook.com/groups/{group_id}")
+                self.tabs.append((new_tab, group_id, time.time()))
                 return True
-            except Exception as e:
-                print(f"[Worker {chrome_instance.worker_id}] Lỗi lưu dữ liệu: {str(e)}")
+            except TimeoutException:
+                self.driver.close()
+                self.driver.switch_to.window(self.main_window)
                 return False
+                
+        except Exception as e:
+            print(f"Lỗi khi mở tab mới cho group {group_id}: {str(e)}")
+            try:
+                if len(self.driver.window_handles) > 1:
+                    self.driver.close()
+                self.driver.switch_to.window(self.main_window)
+            except:
+                pass
+            return False
 
-    except Exception as e:
-        print(f"[Worker {chrome_instance.worker_id}] Lỗi xử lý nhóm {group_url}: {str(e)}")
-        chrome_instance.failed_urls.append({
-            'url': group_url,
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        })
-        if retry_count < MAX_RETRIES:
-            time.sleep(random.uniform(1, 2))
-            return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-        return False
+    def check_tab(self, index: int) -> tuple:
+        if index >= len(self.tabs):
+            return None, None, None
 
-def worker_process(chrome_instance: ChromeInstance, keywords: List[str], processed_items: set, processed_groups: set, lock, output_dir):
+        tab_id, group_id, _ = self.tabs[index]
+
+        try:
+            if tab_id not in self.driver.window_handles:
+                self.tabs.pop(index)
+                return group_id, None, "Tab không còn tồn tại"
+
+            time.sleep(TAB_SWITCH_DELAY)
+            self.driver.switch_to.window(tab_id)
+            
+            try:
+                WebDriverWait(self.driver, PAGE_LOAD_TIMEOUT).until(
+                    lambda x: x.execute_script("return document.readyState") == "complete"
+                )
+                is_inactive = check_group_status(self.driver)
+            except TimeoutException:
+                is_inactive = None
+                
+            try:
+                self.driver.close()
+            except:
+                pass
+                
+            self.tabs.pop(index)
+            
+            try:
+                self.driver.switch_to.window(self.main_window)
+            except:
+                if self.driver.window_handles:
+                    self.driver.switch_to.window(self.driver.window_handles[0])
+            
+            return group_id, is_inactive, None
+            
+        except NoSuchWindowException:
+            print(f"Tab {tab_id} đã bị đóng")
+            self.tabs.pop(index)
+            return group_id, None, "Tab đã bị đóng"
+        except Exception as e:
+            print(f"Lỗi khi kiểm tra tab {tab_id}: {str(e)}")
+            try:
+                if tab_id in self.driver.window_handles:
+                    self.driver.switch_to.window(tab_id)
+                    self.driver.close()
+                self.driver.switch_to.window(self.main_window)
+            except:
+                pass
+            self.tabs.pop(index)
+            return group_id, None, str(e)
+
+def load_progress():
+    try:
+        with open(output_dir + '/scan_progress.json', 'r') as f:
+            return json.load(f)
+    except:
+        return {'scanned_uids': []}
+
+def save_progress(scanned_uids):
+    with open(output_dir + '/scan_progress.json', 'w') as f:
+        json.dump({
+            'scanned_uids': list(scanned_uids)
+        }, f)
+
+def worker_process(chrome_instance: ChromeInstance, group_queue: deque, scanned_uids: set, lock):
     try:
         driver = chrome_instance.create_driver()
-        output_file = os.path.join(output_dir, 'groups_data.csv')
-        retry_count = 0
-
+        
         while True:
-            if chrome_instance.check_checkpoint():
-                chrome_instance.is_checkpoint = True
+            if chrome_instance.is_checkpoint:
                 print(f"[Worker {chrome_instance.worker_id}] Tài khoản bị checkpoint, dừng worker")
                 break
 
-            if chrome_instance.check_blocked():
-                chrome_instance.is_blocked = True
+            if chrome_instance.is_blocked:
                 print(f"[Worker {chrome_instance.worker_id}] Tài khoản bị chặn tạm thời, dừng worker")
                 break
-				
-			# Thêm kiểm tra suspicious
-            if chrome_instance.check_suspicious():
-                print(f"[Worker {chrome_instance.worker_id}] Đã xử lý cảnh báo suspicious")
-                time.sleep(random.uniform(1, 2))
-                continue
 
             with lock:
-                if len(keywords) < 2:
+                if not group_queue:
                     break
-                selected_keywords = random.sample(keywords, 2)
-                search_keywords = ' '.join(selected_keywords)
+                current_groups = []
+                for _ in range(min(MAX_PARALLEL_TABS, len(group_queue))):
+                    if group_queue:
+                        current_groups.append(group_queue.popleft())
 
-            if search_keywords in processed_items:
-                continue
+            if not current_groups:
+                break
 
-            try:
-                encoded_keywords = '%20'.join(search_keywords.split())
-                search_url = f"https://www.facebook.com/groups/search/groups?q={encoded_keywords}&filters=eyJwdWJsaWNfZ3JvdXBzOjAiOiJ7XCJuYW1lXCI6XCJwdWJsaWNfZ3JvdXBzXCIsXCJhcmdzXCI6XCJcIn0ifQ%3D%3D"
-
-                print(f"\n[Worker {chrome_instance.worker_id}] Tìm kiếm với từ khóa: {search_keywords}")
-                driver.get(search_url)
-                time.sleep(random.uniform(2, 3))
-
-                # Thu thập URLs với tracking
-                group_urls = chrome_instance.scroll_and_collect_groups()
-                if not group_urls:
-                    print(f"[Worker {chrome_instance.worker_id}] Không tìm thấy URLs cho từ khóa: {search_keywords}")
+            for group_id in current_groups:
+                if not chrome_instance.tab_manager.open_new_tab(group_id):
+                    print(f"[Worker {chrome_instance.worker_id}] ! Không thể mở tab cho group {group_id}")
                     continue
 
-                # Lưu URLs đã thu thập
-                save_group_urls(group_urls, search_keywords, output_dir, chrome_instance.worker_id)
+                time.sleep(random.uniform(MIN_DELAY_BETWEEN_REQUESTS, MAX_DELAY_BETWEEN_REQUESTS))
 
-                # Tracking progress
-                total_urls = len(group_urls)
-                processed_urls = 0
-                failed_urls = 0
+                # Kiểm tra suspicious checkpoint
+                if chrome_instance.check_suspicious():
+                    print(f"[Worker {chrome_instance.worker_id}] Đã xử lý checkpoint nghi ngờ, tiếp tục quét")
+                    continue
 
-                print(f"[Worker {chrome_instance.worker_id}] Bắt đầu xử lý {total_urls} nhóm...")
-                
-                for idx, group_url in enumerate(group_urls, 1):
-                    if group_url in processed_groups:
-                        processed_urls += 1
-                        continue
+                if chrome_instance.check_checkpoint():
+                    chrome_instance.is_checkpoint = True
+                    print(f"[Worker {chrome_instance.worker_id}] Phát hiện checkpoint, dừng worker")
+                    with lock:
+                        group_queue.appendleft(group_id)
+                    break
 
-                    print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm {idx}/{total_urls}")
+                if chrome_instance.check_blocked():
+                    chrome_instance.is_blocked = True
+                    print(f"[Worker {chrome_instance.worker_id}] Phát hiện bị chặn tạm thời, dừng worker")
+                    with lock:
+                        group_queue.appendleft(group_id)
+                    break
+
+                group_id, is_inactive, error = chrome_instance.tab_manager.check_tab(0)
+
+                if error:
+                    print(f"[Worker {chrome_instance.worker_id}] ! Lỗi khi kiểm tra group {group_id}: {error}")
+                    with open(output_dir + '/error_groups.txt', 'a', encoding='utf-8') as f:
+                        f.write(f"{group_id}\n")
+                elif is_inactive is not None:
+                    output_file = '/inactive_groups.txt' if is_inactive else '/active_groups.txt'
+                    with open(output_dir + output_file, 'a', encoding='utf-8') as f:
+                        f.write(f"{group_id}\n")
                     
-                    if process_single_group(chrome_instance, group_url, search_keywords, output_file, lock):
-                        with lock:
-                            processed_groups.add(group_url)
-                            chrome_instance.processed_groups.add(group_url)
-                        processed_urls += 1
-                    else:
-                        failed_urls += 1
-
-                    time.sleep(random.uniform(MIN_DELAY_BETWEEN_REQUESTS, MAX_DELAY_BETWEEN_REQUESTS))
-
-                print(f"[Worker {chrome_instance.worker_id}] Kết quả xử lý keyword '{search_keywords}':")
-                print(f"- Tổng số URLs: {total_urls}")
-                print(f"- Đã xử lý: {processed_urls}")
-                print(f"- Thất bại: {failed_urls}")
+                    status_symbol = '✗' if is_inactive else '✓'
+                    status_text = 'không còn' if is_inactive else 'còn'
+                    print(f"[Worker {chrome_instance.worker_id}] {status_symbol} Group {group_id} {status_text} hoạt động")
 
                 chrome_instance.processed_count += 1
                 with lock:
-                    processed_items.add(search_keywords)
+                    scanned_uids.add(group_id)
                     if chrome_instance.processed_count % 10 == 0:
-                        save_progress(processed_items, processed_groups, output_dir)
-
-            except Exception as e:
-                print(f"[Worker {chrome_instance.worker_id}] Lỗi xử lý từ khóa {search_keywords}: {str(e)}")
-                retry_count += 1
-                if retry_count >= MAX_RETRIES:
-                    print(f"[Worker {chrome_instance.worker_id}] Đã vượt quá số lần thử lại cho phép")
-                    break
-                time.sleep(random.uniform(2, 4))
-
+                        save_progress(scanned_uids)
     except Exception as e:
         print(f"[Worker {chrome_instance.worker_id}] Lỗi: {str(e)}")
     finally:
-        if chrome_instance.failed_urls:
-            save_failed_urls(chrome_instance.failed_urls, output_dir, chrome_instance.worker_id)
         if chrome_instance.driver:
             chrome_instance.driver.quit()
 
-def load_keywords(file_path):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        return [line.strip() for line in f.readlines() if line.strip()]
-
-def load_progress(output_dir):
-    try:
-        with open(os.path.join(output_dir, 'scan_progress.json'), 'r') as f:
-            data = json.load(f)
-            return data.get('processed_items', []), set(data.get('processed_groups', []))
-    except:
-        return [], set()
-
-def save_progress(processed_items, processed_groups, output_dir):
-    with open(os.path.join(output_dir, 'scan_progress.json'), 'w') as f:
-        json.dump({
-            'processed_items': list(processed_items),
-            'processed_groups': list(processed_groups)
-        }, f)
-
 def main():
-    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
+    with open(uid_list_file, 'r') as f:
+        all_group_ids = f.read().splitlines()
 
-    os.makedirs(output_dir, exist_ok=True)
+    progress = load_progress()
+    scanned_uids = set(progress['scanned_uids'])
 
-    keywords = load_keywords(input_file)
-    processed_items, processed_groups = load_progress(output_dir)
-    processed_items = set(processed_items)
+    group_ids = [gid for gid in all_group_ids if gid not in scanned_uids]
+    group_queue = deque(group_ids)
 
-    print(f"Tổng số keywords: {len(keywords)}")
+    total_groups = len(group_ids)
+    print(f"Tổng số UID cần quét: {total_groups}")
 
     chrome_instances = [
         ChromeInstance(debug_port=9222, worker_id=1),
@@ -537,7 +332,7 @@ def main():
     for chrome_instance in chrome_instances:
         thread = threading.Thread(
             target=worker_process,
-            args=(chrome_instance, keywords, processed_items, processed_groups, lock, output_dir)
+            args=(chrome_instance, group_queue, scanned_uids, lock)
         )
         threads.append(thread)
         thread.start()
@@ -545,7 +340,7 @@ def main():
     for thread in threads:
         thread.join()
 
-    print("\nHoàn tất xử lý!")
+    print("\nHoàn tất quét!")
 
 if __name__ == "__main__":
     main()
