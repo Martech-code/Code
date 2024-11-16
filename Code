@@ -280,7 +280,6 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
     try:
         chrome_instance.driver.get(group_url)
         time.sleep(random.uniform(2, 3))
-		
         
         # Thêm hàm check_page_status vào đây
         def check_page_status(timeout=120):
@@ -328,11 +327,40 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             else:
                 raise Exception("Không thể tải trang sau nhiều lần thử")
         
-		# Thêm xử lý popup block
-        if chrome_instance.close_block_popup():
-            print(f"[Worker {chrome_instance.worker_id}] Đã đóng popup block")
-            time.sleep(random.uniform(1, 2))
+        def handle_popup():
+            """Xử lý popup block"""
+            if chrome_instance.close_block_popup():
+                print(f"[Worker {chrome_instance.worker_id}] Đã đóng popup block")
+                time.sleep(random.uniform(1, 2))
+                return True
+            return False
 
+        def popup_checker():
+            """Kiểm tra popup định kỳ"""
+            while True:
+                handle_popup()
+                time.sleep(5)
+
+        try:
+            chrome_instance.driver.get(group_url)
+            time.sleep(random.uniform(2, 3))
+
+            if not check_page_status():
+                if retry_count < MAX_RETRIES:
+                    print(f"[Worker {chrome_instance.worker_id}] Tải lại trang và thử lại...")
+                    time.sleep(random.uniform(1, 2))
+                    return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
+                raise Exception("Không thể tải trang sau nhiều lần thử")
+
+            handle_popup()
+            popup_thread = threading.Thread(target=popup_checker, daemon=True)
+            popup_thread.start()
+
+        except Exception as e:
+            print(f"[Worker {chrome_instance.worker_id}] Lỗi khi xử lý popup: {str(e)}")
+            if retry_count < MAX_RETRIES:
+                return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
+            raise
 
         # Check if page loaded properly
         if "content not found" in chrome_instance.driver.page_source.lower() or "không tìm thấy nội dung" in chrome_instance.driver.page_source.lower():
@@ -403,7 +431,6 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
         except Exception as e:
             print(f"[Worker {chrome_instance.worker_id}] Lỗi khi kiểm tra quyền đăng bài: {str(e)}")
             can_post = "No"
-        
 
         # Random scroll 3-6 times
         num_scrolls = random.randint(3, 6)
