@@ -328,10 +328,34 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             else:
                 raise Exception("Không thể tải trang sau nhiều lần thử")
         
-		# Thêm xử lý popup block
-        if chrome_instance.close_block_popup():
-            print(f"[Worker {chrome_instance.worker_id}] Đã đóng popup block")
-            time.sleep(random.uniform(1, 2))
+        def handle_popup():
+            """Xử lý popup block"""
+            if chrome_instance.close_block_popup():
+                print(f"[Worker {chrome_instance.worker_id}] Đã đóng popup block")
+                time.sleep(random.uniform(1, 2))
+                return True
+            return False
+
+        def popup_checker():
+            """Kiểm tra popup định kỳ"""
+            while True:
+                handle_popup()
+                time.sleep(5)
+
+        try:
+            chrome_instance.driver.get(group_url)
+            time.sleep(random.uniform(2, 3))
+
+            if not check_page_status():
+                if retry_count < MAX_RETRIES:
+                    print(f"[Worker {chrome_instance.worker_id}] Tải lại trang và thử lại...")
+                    time.sleep(random.uniform(1, 2))
+                    return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
+                raise Exception("Không thể tải trang sau nhiều lần thử")
+
+            handle_popup()
+            popup_thread = threading.Thread(target=popup_checker, daemon=True)
+            popup_thread.start()
 
 
         # Check if page loaded properly
