@@ -287,31 +287,35 @@ def save_failed_urls(failed_urls, output_dir, worker_id):
 
 def convert_members_count(count_text):
     try:
-        # Remove "thành viên", "members" text
-        count_text = count_text.lower().replace('thành viên', '').replace('members', '').strip()
+        # Remove "thành viên", "members" text and whitespace
+        count_text = count_text.lower().replace('thành viên', '').replace('members', '').replace(' ', '').strip()
+        
+        # Standardize decimal separator to dot
+        if ',' in count_text:
+            count_text = count_text.replace(',', '.')
         
         # Handle "triệu" (Vietnamese millions)
-        if 'triệu' in count_text.lower():
-            number = float(count_text.lower().replace('triệu', '').replace(',', '.').strip())
+        if 'triệu' in count_text:
+            number = float(count_text.replace('triệu', ''))
             return int(number * 1000000)
         
         # Handle K (thousands)
-        if 'k' in count_text.lower():
-            number = float(count_text.lower().replace('k', '').replace(',', '.'))
+        if 'k' in count_text:
+            number = float(count_text.replace('k', ''))
             return int(number * 1000)
         
         # Handle M (millions) 
-        if 'm' in count_text.lower():
-            number = float(count_text.lower().replace('m', '').replace(',', '.'))
+        if 'm' in count_text:
+            number = float(count_text.replace('m', ''))
             return int(number * 1000000)
             
         # Handle B (billions)
-        if 'b' in count_text.lower():
-            number = float(count_text.lower().replace('b', '').replace(',', '.'))
+        if 'b' in count_text:
+            number = float(count_text.replace('b', ''))
             return int(number * 1000000000)
             
         # Handle regular numbers
-        return int(count_text.replace(',', ''))
+        return int(float(count_text))
     except:
         return 0
 
@@ -319,7 +323,7 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
     print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm: {group_url}")
     try:
         chrome_instance.driver.get(group_url)
-        chrome_instance.url_monitor() 
+        chrome_instance.url_monitor()
         
         time.sleep(random.uniform(2, 3))
 
@@ -374,9 +378,18 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
                 time.sleep(random.uniform(1, 2))
                 return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
             else:
-                raise Exception("Không thể lấy số lượng thành viên")
+                members_count = "0"
 
         numeric_members_count = convert_members_count(members_count)
+
+        # Kiểm tra nếu không lấy được group_type và members_count
+        if group_type == "Unknown" and members_count == "0":
+            chrome_instance.failed_urls.append({
+                'url': group_url,
+                'error': "Không thể lấy group_type và members_count",
+                'timestamp': datetime.now().isoformat()
+            })
+            return True
 
         try:
             can_post = "No"
