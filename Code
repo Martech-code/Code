@@ -211,6 +211,14 @@ class ChromeInstance:
             if current_unique_count == previous_unique_count:
                 no_new_content_count += 1
                 print(f"[Worker {self.worker_id}] Không tìm thấy nhóm mới... ({no_new_content_count}/8)")
+                
+                # Kiểm tra popup khi no_new_content_count = 6
+                if no_new_content_count == 6:
+                    print(f"[Worker {self.worker_id}] Kiểm tra và xử lý popup tại lần thứ 6...")
+                    if self.close_block_popup():
+                        print(f"[Worker {self.worker_id}] Đã đóng popup block, tiếp tục thu thập...")
+                        time.sleep(1)
+                
                 if no_new_content_count >= 8:
                     print(f"[Worker {self.worker_id}] Hoàn tất thu thập URLs sau 8 lần không có nhóm mới")
                     break
@@ -416,8 +424,8 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             chrome_instance.driver.execute_script("window.scrollBy(0, 600)")
             time.sleep(random.uniform(0.5, 1))
             
-            # Check popup sau lần scroll đầu tiên
-            if i == 0:
+            # Check popup sau lần scroll cuối cùng
+            if i == num_scrolls - 1:  # Thay đổi điều kiện từ i == 0 thành i == num_scrolls - 1
                 time.sleep(1)
                 handle_popup()
 
@@ -628,8 +636,8 @@ def save_progress(processed_items, processed_groups, output_dir):
         }, f)
 
 def main():
-    input_file = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\output'
+    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
+    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
 
