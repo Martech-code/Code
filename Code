@@ -136,69 +136,88 @@ class ChromeInstance:
 
     def check_suspicious(self):
         try:
+            # Theo dõi URL hiện tại
             current_url = self.driver.current_url.lower()
+            
+            # Nếu URL chứa checkpoint suspicious
             if "facebook.com/checkpoint/601051028565049" in current_url:
+                # Tìm nút "Bỏ qua" hoặc "Dismiss"
                 skip_button = self.driver.find_elements(By.XPATH, "//span[contains(@class, 'x1lliihq') and contains(@class, 'x6ikm8r') and contains(@class, 'x10wlt62') and contains(@class, 'x1n2onr6') and contains(@class, 'xlyipyv') and contains(@class, 'xuxw1ft') and (contains(text(), 'Bỏ qua') or contains(text(), 'Dismiss'))]")
+                
                 if skip_button:
-                    actions = ActionChains(self.driver)
-                    actions.double_click(skip_button[0]).perform()
-                    time.sleep(1)
-                    return True
+                    try:
+                        actions = ActionChains(self.driver)
+                        actions.double_click(skip_button[0]).perform()
+                        print(f"[Worker {self.worker_id}] Đã click nút Bỏ qua trên trang Checkpoint")
+                        time.sleep(1)
+                        return True
+                    except Exception as e:
+                        print(f"[Worker {self.worker_id}] Lỗi khi click nút Bỏ qua: {str(e)}")
+                        return False
             return False
-        except:
+        except Exception as e:
+            print(f"[Worker {self.worker_id}] Lỗi khi kiểm tra trang suspicious: {str(e)}")
             return False
+
+    # Thêm hàm mới để theo dõi URL
+    def url_monitor(self):
+        """Hàm theo dõi URL và xử lý checkpoint"""
+        try:
+            current_url = self.driver.current_url
+            if "facebook.com/checkpoint/601051028565049" in current_url.lower():
+                self.check_suspicious()
+        except Exception as e:
+            print(f"[Worker {self.worker_id}] Lỗi khi theo dõi URL: {str(e)}")
 
     def scroll_and_collect_groups(self):
         print(f"[Worker {self.worker_id}] Bắt đầu scroll và thu thập URLs...")
-        group_links = set()
+        group_links = []  # Đổi từ set sang list để duy trì thứ tự
+        group_links_set = set()  # Dùng set để kiểm tra trùng lặp
         no_new_content_count = 0
-        previous_content_length = 0
+        previous_unique_count = 0
         last_height = self.driver.execute_script("return document.documentElement.scrollHeight")
         
         while True:
-            # Scroll xuống
             current_height = self.driver.execute_script("return window.pageYOffset")
             target_height = min(current_height + 300, last_height)
             self.driver.execute_script(f"window.scrollTo(0, {target_height});")
             time.sleep(0.3)
 
-            # Đợi để trang load thêm nội dung
             time.sleep(SCROLL_PAUSE_TIME)
             
-            # Kiểm tra vị trí scroll hiện tại
             actual_height = self.driver.execute_script("return window.pageYOffset")
-            if abs(actual_height - target_height) > 50:  # Nếu vị trí scroll bị nhảy
+            if abs(actual_height - target_height) > 50:
                 self.driver.execute_script(f"window.scrollTo(0, {target_height});")
                 time.sleep(0.3)
 
-            # Thu thập URLs
             elements = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/groups/']")
-            current_content_length = len(elements)
             
-            print(f"[Worker {self.worker_id}] Đã tìm thấy {current_content_length} nhóm...")
-            
+            new_urls_added = 0
             for element in elements:
                 try:
                     href = element.get_attribute('href')
                     if href and re.search(r'facebook\.com/groups/\d+/?$', href):
                         clean_url = re.sub(r'\?.*$', '', href)
-                        if clean_url not in self.processed_groups:
-                            group_links.add(clean_url)
+                        if clean_url not in self.processed_groups and clean_url not in group_links_set:
+                            group_links.append(clean_url)  # Thêm vào list để giữ thứ tự
+                            group_links_set.add(clean_url)  # Thêm vào set để kiểm tra trùng lặp
+                            new_urls_added += 1
                 except:
                     continue
-
-            # Kiểm tra xem có nội dung mới không
-            if current_content_length == previous_content_length:
+            
+            current_unique_count = len(group_links)
+            print(f"[Worker {self.worker_id}] Đã tìm thấy {new_urls_added} nhóm mới (Tổng: {current_unique_count} nhóm độc nhất)")
+            
+            if current_unique_count == previous_unique_count:
                 no_new_content_count += 1
-                print(f"[Worker {self.worker_id}] Không tìm thấy nội dung mới... ({no_new_content_count}/8)")
+                print(f"[Worker {self.worker_id}] Không tìm thấy nhóm mới... ({no_new_content_count}/8)")
                 if no_new_content_count >= 8:
-                    print(f"[Worker {self.worker_id}] Hoàn tất thu thập URLs sau 8 lần không có nội dung mới")
+                    print(f"[Worker {self.worker_id}] Hoàn tất thu thập URLs sau 8 lần không có nhóm mới")
                     break
             else:
                 no_new_content_count = 0
-                previous_content_length = current_content_length
+                previous_unique_count = current_unique_count
 
-            # Cập nhật chiều cao trang mới
             new_height = self.driver.execute_script("return document.documentElement.scrollHeight")
             if new_height != last_height:
                 last_height = new_height
@@ -210,29 +229,46 @@ class ChromeInstance:
                     break
 
         print(f"[Worker {self.worker_id}] Tổng cộng đã thu thập được {len(group_links)} URLs độc nhất")
-        return list(group_links)
+        return group_links  # Trả về list thay vì set
 
 def save_group_urls(urls, keyword, output_dir, worker_id):
     file_path = os.path.join(output_dir, f'collected_urls_worker_{worker_id}.json')
     data = {
         'keyword': keyword,
         'timestamp': datetime.now().isoformat(),
-        'urls': urls
+        'urls': urls,
+        'total_urls': len(urls)
     }
 
     try:
+        existing_data = []
         if os.path.exists(file_path):
             with open(file_path, 'r', encoding='utf-8') as f:
-                existing_data = json.load(f)
-                if not isinstance(existing_data, list):
-                    existing_data = [existing_data]
-        else:
-            existing_data = []
-            
-        existing_data.append(data)
+                try:
+                    existing_data = json.load(f)
+                    if not isinstance(existing_data, list):
+                        existing_data = [existing_data]
+                except json.JSONDecodeError:
+                    existing_data = []
         
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        # Tạo set của URLs đã tồn tại
+        existing_urls = set()
+        for entry in existing_data:
+            existing_urls.update(entry.get('urls', []))
+        
+        # Lọc URLs mới và giữ nguyên thứ tự
+        new_urls = [url for url in urls if url not in existing_urls]
+        if new_urls:
+            data['urls'] = new_urls
+            data['total_urls'] = len(new_urls)
+            existing_data.append(data)
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=2)
+            print(f"[Worker {worker_id}] Đã lưu {len(new_urls)} URLs mới vào file")
+        else:
+            print(f"[Worker {worker_id}] Không có URLs mới để lưu")
+            
     except Exception as e:
         print(f"Error saving URLs to JSON: {str(e)}")
 
@@ -240,7 +276,11 @@ def save_failed_urls(failed_urls, output_dir, worker_id):
     file_path = os.path.join(output_dir, f'failed_urls_worker_{worker_id}.json')
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(failed_urls, f, ensure_ascii=False, indent=2)
+            json.dump({
+                'failed_urls': failed_urls,
+                'total_failed': len(failed_urls),
+                'timestamp': datetime.now().isoformat()
+            }, f, ensure_ascii=False, indent=2)
         print(f"[Worker {worker_id}] Đã lưu {len(failed_urls)} URLs thất bại vào file")
     except Exception as e:
         print(f"Error saving failed URLs: {str(e)}")
@@ -279,54 +319,10 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
     print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm: {group_url}")
     try:
         chrome_instance.driver.get(group_url)
+        chrome_instance.url_monitor() 
+        
         time.sleep(random.uniform(2, 3))
-        
-        # Thêm hàm check_page_status vào đây
-        def check_page_status(timeout=120):
-            """
-            Kiểm tra trạng thái tải trang và tự động tải lại nếu bị đứng
-            """
-            start_time = time.time()
-            while True:
-                current_time = time.time()
-                if current_time - start_time > timeout:
-                    print(f"[Worker {chrome_instance.worker_id}] Trang đang bị đứng, đang tải lại...")
-                    try:
-                        current_url = chrome_instance.driver.current_url
-                        chrome_instance.driver.refresh()
-                        time.sleep(3)
-                        return True
-                    except Exception as e:
-                        print(f"[Worker {chrome_instance.worker_id}] Lỗi khi tải lại trang: {str(e)}")
-                        return False
-                
-                try:
-                    # Kiểm tra xem page có đang ready
-                    page_state = chrome_instance.driver.execute_script('return document.readyState;')
-                    if page_state == 'complete':
-                        return True
-                    
-                    # Kiểm tra lỗi Out of Memory
-                    if "Out Of Memory" in chrome_instance.driver.page_source:
-                        print(f"[Worker {chrome_instance.worker_id}] Phát hiện lỗi Out Of Memory, đang tải lại trang...")
-                        chrome_instance.driver.refresh()
-                        time.sleep(3)
-                        return True
-                    
-                except Exception as e:
-                    print(f"[Worker {chrome_instance.worker_id}] Lỗi khi kiểm tra trạng thái: {str(e)}")
-                    
-                time.sleep(1)
 
-        # Gọi hàm check_page_status trước khi xử lý dữ liệu của nhóm
-        if not check_page_status():
-            if retry_count < MAX_RETRIES:
-                print(f"[Worker {chrome_instance.worker_id}] Tải lại trang và thử lại...")
-                time.sleep(random.uniform(1, 2))
-                return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-            else:
-                raise Exception("Không thể tải trang sau nhiều lần thử")
-        
         def handle_popup():
             """Xử lý popup block"""
             if chrome_instance.close_block_popup():
@@ -335,34 +331,10 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
                 return True
             return False
 
-        def popup_checker():
-            """Kiểm tra popup định kỳ"""
-            while True:
-                handle_popup()
-                time.sleep(5)
+        # Check popup sau khi load trang
+        time.sleep(1)
+        handle_popup()
 
-        try:
-            chrome_instance.driver.get(group_url)
-            time.sleep(random.uniform(2, 3))
-
-            if not check_page_status():
-                if retry_count < MAX_RETRIES:
-                    print(f"[Worker {chrome_instance.worker_id}] Tải lại trang và thử lại...")
-                    time.sleep(random.uniform(1, 2))
-                    return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-                raise Exception("Không thể tải trang sau nhiều lần thử")
-
-            handle_popup()
-            popup_thread = threading.Thread(target=popup_checker, daemon=True)
-            popup_thread.start()
-
-        except Exception as e:
-            print(f"[Worker {chrome_instance.worker_id}] Lỗi khi xử lý popup: {str(e)}")
-            if retry_count < MAX_RETRIES:
-                return process_single_group(chrome_instance, group_url, search_keywords, output_file, lock, retry_count + 1)
-            raise
-
-        # Check if page loaded properly
         if "content not found" in chrome_instance.driver.page_source.lower() or "không tìm thấy nội dung" in chrome_instance.driver.page_source.lower():
             if retry_count < MAX_RETRIES:
                 time.sleep(random.uniform(1, 3))
@@ -370,9 +342,8 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             else:
                 raise Exception("Không thể tải trang sau nhiều lần thử")
 
-        # Get group name with explicit wait and retry
         try:
-            group_name_element = WebDriverWait(chrome_instance.driver, 5).until(
+            group_name_element = WebDriverWait(chrome_instance.driver, 2).until(
                 EC.presence_of_element_located((By.XPATH, "//h1//a[contains(@class, 'x16tdsg8')]"))
             )
             group_name = group_name_element.text.strip()
@@ -383,18 +354,16 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             else:
                 raise Exception("Không thể lấy tên nhóm")
 
-        # Get group type with retry
         try:
-            group_type_element = WebDriverWait(chrome_instance.driver, 5).until(
+            group_type_element = WebDriverWait(chrome_instance.driver, 1).until(
                 EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Nhóm') and contains(@class, 'x1n2onr6')]"))
             )
             group_type = group_type_element.text.strip()
         except:
             group_type = "Unknown"
 
-        # Get members count with retry
         try:
-            members_element = WebDriverWait(chrome_instance.driver, 5).until(
+            members_element = WebDriverWait(chrome_instance.driver, 1).until(
                 EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/members/')]"))
             )
             members_text = members_element.text
@@ -407,22 +376,18 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             else:
                 raise Exception("Không thể lấy số lượng thành viên")
 
-        # Convert members count to actual number
         numeric_members_count = convert_members_count(members_count)
 
-        # Get posting permission status with retry
         try:
             can_post = "No"
             try:
-                # Try Vietnamese version
-                post_box_vn = WebDriverWait(chrome_instance.driver, 5).until(
+                post_box_vn = WebDriverWait(chrome_instance.driver, 2).until(
                     EC.presence_of_element_located((By.XPATH, '//span[@class="x1lliihq x6ikm8r x10wlt62 x1n2onr6" and contains(text(), "Bạn viết gì đi...")]'))
                 )
                 can_post = "Yes"
             except:
                 try:
-                    # Try English version
-                    post_box_en = WebDriverWait(chrome_instance.driver, 5).until(
+                    post_box_en = WebDriverWait(chrome_instance.driver, 2).until(
                         EC.presence_of_element_located((By.XPATH, '//span[@class="x1lliihq x6ikm8r x10wlt62 x1n2onr6" and contains(text(), "Write something...")]'))
                     )
                     can_post = "Yes"
@@ -432,11 +397,16 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             print(f"[Worker {chrome_instance.worker_id}] Lỗi khi kiểm tra quyền đăng bài: {str(e)}")
             can_post = "No"
 
-        # Random scroll 3-6 times
-        num_scrolls = random.randint(3, 6)
-        for _ in range(num_scrolls):
+        # Thực hiện scroll
+        num_scrolls = random.randint(1, 3)
+        for i in range(num_scrolls):
             chrome_instance.driver.execute_script("window.scrollBy(0, 600)")
             time.sleep(random.uniform(0.5, 1))
+            
+            # Check popup sau lần scroll đầu tiên
+            if i == 0:
+                time.sleep(1)
+                handle_popup()
 
         group_data = {
             'keyword_search': search_keywords,
@@ -447,7 +417,6 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
             'can_post': can_post
         }
 
-        # Save with lock and verification
         with lock:
             try:
                 write_header = not os.path.exists(output_file)
@@ -626,6 +595,10 @@ def load_keywords(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         return [line.strip() for line in f.readlines() if line.strip()]
 
+def get_combinations_count(n):
+    # Tính số tổ hợp chập 2 của n phần tử
+    return (n * (n - 1)) // 2
+
 def load_progress(output_dir):
     try:
         with open(os.path.join(output_dir, 'scan_progress.json'), 'r') as f:
@@ -651,7 +624,14 @@ def main():
     processed_items, processed_groups = load_progress(output_dir)
     processed_items = set(processed_items)
 
-    print(f"Tổng số keywords: {len(keywords)}")
+    total_keywords = len(keywords)
+    total_combinations = get_combinations_count(total_keywords)
+    used_combinations = len(processed_items)
+
+    print(f"Tổng số keywords gốc: {total_keywords}")
+    print(f"Tổng số tổ hợp có thể: {total_combinations}")
+    print(f"Số tổ hợp đã sử dụng: {used_combinations}")
+    print(f"Còn lại: {total_combinations - used_combinations} tổ hợp chưa sử dụng")
 
     chrome_instances = [
         ChromeInstance(debug_port=9222, worker_id=1),
