@@ -218,6 +218,7 @@ class ChromeInstance:
                     if self.close_block_popup():
                         print(f"[Worker {self.worker_id}] Đã đóng popup block, tiếp tục thu thập...")
                         time.sleep(1)
+                        continue  # Bỏ qua phần còn lại và tiếp tục vòng lặp
                 
                 if no_new_content_count >= 8:
                     print(f"[Worker {self.worker_id}] Hoàn tất thu thập URLs sau 8 lần không có nhóm mới")
@@ -589,6 +590,14 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                 print(f"- Tổng số URLs: {total_urls}")
                 print(f"- Đã xử lý: {processed_urls}")
                 print(f"- Thất bại: {failed_urls}")
+                
+                chrome_instance.close_block_popup()
+                time.sleep(1)  # Chờ 1 giây sau khi đóng popup
+
+                if chrome_instance.check_blocked():
+                    chrome_instance.is_blocked = True
+                    print(f"[Worker {chrome_instance.worker_id}] Tài khoản bị chặn tạm thời, dừng worker")
+                    break                
 
                 chrome_instance.processed_count += 1
                 with lock:
