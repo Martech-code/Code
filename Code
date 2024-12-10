@@ -89,6 +89,12 @@ class ChromeInstance:
         chrome_options.add_argument('--disable-notifications')
         chrome_options.add_argument('--disable-infobars')
         chrome_options.add_argument('--lang=vi')
+        # Thêm các options mới
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--disk-cache-size=1')
+        chrome_options.add_argument('--media-cache-size=1')
+        chrome_options.add_argument('--disable-applications-cache')
+        
         return chrome_options
 
     def create_driver(self):
@@ -669,7 +675,16 @@ def main():
         ChromeInstance(debug_port=9224, worker_id=3),
         ChromeInstance(debug_port=9225, worker_id=4),
         ChromeInstance(debug_port=9226, worker_id=5),
-        ChromeInstance(debug_port=9227, worker_id=6)
+        ChromeInstance(debug_port=9227, worker_id=6),
+        ChromeInstance(debug_port=9228, worker_id=7),
+        ChromeInstance(debug_port=9229, worker_id=8),
+        ChromeInstance(debug_port=9230, worker_id=9),
+        ChromeInstance(debug_port=9231, worker_id=10),
+        ChromeInstance(debug_port=9232, worker_id=11),
+        ChromeInstance(debug_port=9233, worker_id=12),
+        ChromeInstance(debug_port=9234, worker_id=13),
+        ChromeInstance(debug_port=9235, worker_id=14),
+        ChromeInstance(debug_port=9236, worker_id=15)
     ]
 
     lock = threading.Lock()
