@@ -37,18 +37,18 @@ def calculate_std_dev(values):
     return math.sqrt(squared_diff_sum / (n - 1))
 
 class ChromeInstance:
-    def __init__(self, debug_port, worker_id):
-        self.debug_port = debug_port
-        self.worker_id = worker_id
-        self.proxy_auth = proxy_auth  # Format: {'username': 'user', 'password': 'pass'
-        self.proxy_auth_done = False  # Flag kiểm tra đã xác thực proxy chưa
-        self.driver = None
-        self.processed_count = 0
-        self.is_checkpoint = False
-        self.is_blocked = False
-        self.processed_groups = set()
-        self.collected_urls = []
-        self.failed_urls = []      
+    def __init__(self, debug_port, worker_id, proxy_auth=None):
+            self.debug_port = debug_port
+            self.worker_id = worker_id
+            self.proxy_auth = proxy_auth  # Format: {'username': 'user', 'password': 'pass'}
+            self.proxy_auth_done = False  # Flag kiểm tra đã xác thực proxy chưa
+            self.driver = None
+            self.processed_count = 0
+            self.is_checkpoint = False
+            self.is_blocked = False
+            self.processed_groups = set()
+            self.collected_urls = []
+            self.failed_urls = []     
         
     def handle_proxy_auth_popup(self):
         try:
