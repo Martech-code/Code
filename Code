@@ -40,39 +40,55 @@ class ChromeInstance:
     def __init__(self, debug_port, worker_id):
         self.debug_port = debug_port
         self.worker_id = worker_id
+        self.proxy_auth = proxy_auth  # Format: {'username': 'user', 'password': 'pass'
+        self.proxy_auth_done = False  # Flag kiểm tra đã xác thực proxy chưa
         self.driver = None
         self.processed_count = 0
         self.is_checkpoint = False
         self.is_blocked = False
         self.processed_groups = set()
         self.collected_urls = []
-        self.failed_urls = []
-        self.proxy_auth = proxy_auth  # Format: {'username': 'user', 'password': 'pass'
+        self.failed_urls = []      
         
     def handle_proxy_auth_popup(self):
         try:
-            # Đợi popup xuất hiện
+            if not self.proxy_auth or self.proxy_auth_done:
+                return True
+                
             time.sleep(2)  # Đợi popup xuất hiện
             
-            # Chuyển sang cửa sổ xác thực
+            # Chuyển sang alert window
             alert = self.driver.switch_to.alert
             
-            # Kiểm tra nếu có thông tin xác thực proxy
-            if self.proxy_auth and isinstance(self.proxy_auth, dict):
+            # Kiểm tra và điền thông tin xác thực
+            if isinstance(self.proxy_auth, dict):
                 username = self.proxy_auth.get('username', '')
                 password = self.proxy_auth.get('password', '')
                 
-                # Mô phỏng nhập username và password
+                # Nhập username và password vào popup
                 alert.send_keys(f"{username}\t{password}")
                 time.sleep(0.5)
                 alert.accept()
                 
-                print(f"[Worker {self.worker_id}] Đã xác thực proxy thành công")
+                # Đánh dấu đã xác thực
+                self.proxy_auth_done = True
+                print(f"[Worker {self.worker_id}] Xác thực proxy thành công với user: {username}")
                 return True
                 
         except Exception as e:
             print(f"[Worker {self.worker_id}] Lỗi xử lý popup xác thực proxy: {str(e)}")
             return False
+
+    def wait_for_proxy_auth_popup(self, timeout=10):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Kiểm tra popup
+                alert = self.driver.switch_to.alert
+                return True
+            except:
+                time.sleep(0.5)
+        return False
         
     def save_progress(self, keyword, urls, current_index, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
@@ -130,14 +146,19 @@ class ChromeInstance:
             self.driver = webdriver.Chrome(service=service, options=options)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
             
-            # Truy cập một trang web để kích hoạt popup proxy
+            # Truy cập facebook để trigger proxy auth popup
+            print(f"[Worker {self.worker_id}] Truy cập Facebook để xác thực proxy...")
             self.driver.get("https://www.facebook.com")
             
-            # Sau khi truy cập web, xử lý popup xác thực proxy
-            if self.proxy_auth:
-                self.handle_proxy_auth_popup()
-                # Tải lại trang để áp dụng xác thực proxy
-                self.driver.refresh()
+            # Xử lý popup xác thực proxy
+            if self.proxy_auth and not self.proxy_auth_done:
+                if self.wait_for_proxy_auth_popup():
+                    if self.handle_proxy_auth_popup():
+                        time.sleep(2)
+                        # Tải lại trang sau khi xác thực
+                        self.driver.refresh()
+                    else:
+                        raise Exception("Không thể xác thực proxy")
                 
             return self.driver
         except Exception as e:
@@ -782,6 +803,14 @@ def main():
             proxy_auth={'username': 'user15', 'password': 'pass15'}
         )
     ]
+    
+    # Sử dụng workers
+    for instance in chrome_instances:
+        try:
+            instance.create_driver()
+            # Thực hiện các công việc khác với worker
+        except Exception as e:
+            print(f"Lỗi khởi tạo worker {instance.worker_id}: {str(e)}")
 
     lock = threading.Lock()
 
