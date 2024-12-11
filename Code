@@ -703,16 +703,9 @@ def main():
     print(f"Tổng số tổ hợp có thể: {total_combinations}")
     print(f"Số tổ hợp đã sử dụng: {used_combinations}")
     print(f"Còn lại: {total_combinations - used_combinations} tổ hợp chưa sử dụng")
-    
-    proxies = [
-        "104.238.144.113:10015:usr07ougOj1:passZXecUzV0",  # proxy cho worker 1
-        "104.238.144.114:10015:usr07ougOj2:passZXecUzV1",  # proxy cho worker 2
-        "104.238.144.115:10015:usr07ougOj3:passZXecUzV2",  # proxy cho worker 3
-        # ... thêm các proxy khác
-    ]
 
     chrome_instances = [
-        ChromeInstance(debug_port=9222, worker_id=1).create_driver(proxy=proxies[0]),
+        ChromeInstance(debug_port=9222, worker_id=1).create_driver(proxy=proxies"104.238.144.113:10015:usr07ougOj1:passZXecUzV0"),
         ChromeInstance(debug_port=9223, worker_id=2),
         ChromeInstance(debug_port=9224, worker_id=3),
         ChromeInstance(debug_port=9225, worker_id=4),
