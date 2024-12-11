@@ -47,7 +47,33 @@ class ChromeInstance:
         self.processed_groups = set()
         self.collected_urls = []
         self.failed_urls = []
-
+        self.proxy_auth = proxy_auth  # Format: {'username': 'user', 'password': 'pass'
+        
+    def handle_proxy_auth_popup(self):
+        try:
+            # Đợi popup xuất hiện
+            time.sleep(2)  # Đợi popup xuất hiện
+            
+            # Chuyển sang cửa sổ xác thực
+            alert = self.driver.switch_to.alert
+            
+            # Kiểm tra nếu có thông tin xác thực proxy
+            if self.proxy_auth and isinstance(self.proxy_auth, dict):
+                username = self.proxy_auth.get('username', '')
+                password = self.proxy_auth.get('password', '')
+                
+                # Mô phỏng nhập username và password
+                alert.send_keys(f"{username}\t{password}")
+                time.sleep(0.5)
+                alert.accept()
+                
+                print(f"[Worker {self.worker_id}] Đã xác thực proxy thành công")
+                return True
+                
+        except Exception as e:
+            print(f"[Worker {self.worker_id}] Lỗi xử lý popup xác thực proxy: {str(e)}")
+            return False
+        
     def save_progress(self, keyword, urls, current_index, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
         progress_data = {
@@ -103,6 +129,16 @@ class ChromeInstance:
             service = Service()
             self.driver = webdriver.Chrome(service=service, options=options)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+            
+            # Truy cập một trang web để kích hoạt popup proxy
+            self.driver.get("https://www.facebook.com")
+            
+            # Sau khi truy cập web, xử lý popup xác thực proxy
+            if self.proxy_auth:
+                self.handle_proxy_auth_popup()
+                # Tải lại trang để áp dụng xác thực proxy
+                self.driver.refresh()
+                
             return self.driver
         except Exception as e:
             raise Exception(f"Lỗi khởi tạo Chrome WebDriver port {self.debug_port}: {str(e)}")
@@ -670,21 +706,81 @@ def main():
     print(f"Còn lại: {total_combinations - used_combinations} tổ hợp chưa sử dụng")
 
     chrome_instances = [
-        ChromeInstance(debug_port=9222, worker_id=1),
-        ChromeInstance(debug_port=9223, worker_id=2),
-        ChromeInstance(debug_port=9224, worker_id=3),
-        ChromeInstance(debug_port=9225, worker_id=4),
-        ChromeInstance(debug_port=9226, worker_id=5),
-        ChromeInstance(debug_port=9227, worker_id=6),
-        ChromeInstance(debug_port=9228, worker_id=7),
-        ChromeInstance(debug_port=9229, worker_id=8),
-        ChromeInstance(debug_port=9230, worker_id=9),
-        ChromeInstance(debug_port=9231, worker_id=10),
-        ChromeInstance(debug_port=9232, worker_id=11),
-        ChromeInstance(debug_port=9233, worker_id=12),
-        ChromeInstance(debug_port=9234, worker_id=13),
-        ChromeInstance(debug_port=9235, worker_id=14),
-        ChromeInstance(debug_port=9236, worker_id=15)
+            ChromeInstance(
+            debug_port=9222, 
+            worker_id=1, 
+            proxy_auth={'username': 'usr07ougOj1', 'password': 'passZXecUzV0'}
+        ),
+        ChromeInstance(
+            debug_port=9223, 
+            worker_id=2, 
+            proxy_auth={'username': 'user2', 'password': 'pass2'}
+        ),
+        ChromeInstance(
+            debug_port=9224, 
+            worker_id=3, 
+            proxy_auth={'username': 'user3', 'password': 'pass3'}
+        ),
+        ChromeInstance(
+            debug_port=9225, 
+            worker_id=4, 
+            proxy_auth={'username': 'user4', 'password': 'pass4'}
+        ),
+        ChromeInstance(
+            debug_port=9226, 
+            worker_id=5, 
+            proxy_auth={'username': 'user5', 'password': 'pass5'}
+        ),
+        ChromeInstance(
+            debug_port=9227, 
+            worker_id=6, 
+            proxy_auth={'username': 'user6', 'password': 'pass6'}
+        ),
+        ChromeInstance(
+            debug_port=9228, 
+            worker_id=7, 
+            proxy_auth={'username': 'user7', 'password': 'pass7'}
+        ),
+        ChromeInstance(
+            debug_port=9229, 
+            worker_id=8, 
+            proxy_auth={'username': 'user8', 'password': 'pass8'}
+        ),
+        ChromeInstance(
+            debug_port=9230, 
+            worker_id=9, 
+            proxy_auth={'username': 'user9', 'password': 'pass9'}
+        ),
+        ChromeInstance(
+            debug_port=9231, 
+            worker_id=10, 
+            proxy_auth={'username': 'user10', 'password': 'pass10'}
+        ),
+        ChromeInstance(
+            debug_port=9232, 
+            worker_id=11, 
+            proxy_auth={'username': 'user11', 'password': 'pass11'}
+        ),
+        ChromeInstance(
+            debug_port=9233, 
+            worker_id=12, 
+            proxy_auth={'username': 'user12', 'password': 'pass12'}
+        ),
+        ChromeInstance(
+            debug_port=9234, 
+            worker_id=13, 
+            proxy_auth={'username': 'user13', 'password': 'pass13'}
+        ),
+        ChromeInstance(
+            debug_port=9235, 
+            worker_id=14, 
+            proxy_auth={'username': 'user14', 'password': 'pass14'}
+        ),
+        ChromeInstance(
+            debug_port=9236, 
+            worker_id=15, 
+            proxy_auth={'username': 'user15', 'password': 'pass15'}
+        )
     ]
 
     lock = threading.Lock()
