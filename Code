@@ -4,7 +4,6 @@ import random
 import json
 import csv
 import re
-import base64
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -15,7 +14,6 @@ from selenium.common.exceptions import TimeoutException, WebDriverException, NoS
 from collections import defaultdict, deque
 from typing import Dict, List
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import os
 import threading
 import math
@@ -25,7 +23,7 @@ import math
 MIN_DELAY_BETWEEN_REQUESTS = 0.5
 MAX_DELAY_BETWEEN_REQUESTS = 1
 MAX_RETRIES = 3
-PAGE_LOAD_TIMEOUT = 10
+PAGE_LOAD_TIMEOUT = 60
 TAB_SWITCH_DELAY = 0.2
 MAX_TABS = 5
 SCROLL_PAUSE_TIME = 2
@@ -39,37 +37,17 @@ def calculate_std_dev(values):
     return math.sqrt(squared_diff_sum / (n - 1))
 
 class ChromeInstance:
-    def __init__(self, debug_port, worker_id, proxy_auth=None):
-            self.debug_port = debug_port
-            self.worker_id = worker_id
-            # Extract proxy auth from URL format
-            self.proxy_auth = self.extract_proxy_auth()
-            self.driver = None
-            self.processed_count = 0
-            self.is_checkpoint = False
-            self.is_blocked = False
-            self.processed_groups = set()
-            self.collected_urls = []
-            self.failed_urls = []
-            
-    def extract_proxy_auth(self):
-        try:
-            # Wait for the page to load
-            time.sleep(2)
-            current_url = self.driver.current_url if self.driver else ""
-            if "proxyauth=" in current_url:
-                auth_part = current_url.split("proxyauth=")[1].split(":")
-                if len(auth_part) == 4:
-                    return {
-                        'host': auth_part[0],
-                        'port': auth_part[1],
-                        'username': auth_part[2],
-                        'password': auth_part[3]
-                    }
-        except Exception as e:
-            print(f"[Worker {self.worker_id}] Error extracting proxy auth: {str(e)}")
-        return None
-        
+    def __init__(self, debug_port, worker_id):
+        self.debug_port = debug_port
+        self.worker_id = worker_id
+        self.driver = None
+        self.processed_count = 0
+        self.is_checkpoint = False
+        self.is_blocked = False
+        self.processed_groups = set()
+        self.collected_urls = []
+        self.failed_urls = []
+
     def save_progress(self, keyword, urls, current_index, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
         progress_data = {
@@ -105,58 +83,33 @@ class ChromeInstance:
     def setup_chrome_driver(self):
         chrome_options = Options()
         chrome_options.add_experimental_option("debuggerAddress", f"127.0.0.1:{self.debug_port}")
-        
-        # Add proxy authentication capabilities
-        if self.proxy_auth:
-            capabilities = webdriver.DesiredCapabilities.CHROME.copy()
-            capabilities['proxy'] = {
-                'httpProxy': f"{self.proxy_auth['host']}:{self.proxy_auth['port']}",
-                'sslProxy': f"{self.proxy_auth['host']}:{self.proxy_auth['port']}",
-                'proxyType': 'MANUAL',
-            }
-            capabilities['proxy']['socksUsername'] = self.proxy_auth['username']
-            capabilities['proxy']['socksPassword'] = self.proxy_auth['password']
-            chrome_options.set_capability('proxy', capabilities['proxy'])
-
-        
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-notifications')
         chrome_options.add_argument('--disable-infobars')
         chrome_options.add_argument('--lang=vi')
+        
         # Thêm các options mới
+        
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-plugins')
+        chrome_options.add_argument('--disable-sync')
+        chrome_options.add_argument('--process-per-site')  # Giảm số process
+        chrome_options.add_argument('--disable-background-networking')
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        chrome_options.add_argument('--disable-breakpad')
+        chrome_options.add_argument('--disable-component-extensions-with-background-pages')
+        chrome_options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')
+        chrome_options.add_argument('--disable-ipc-flooding-protection')
         chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--disk-cache-size=1')
-        chrome_options.add_argument('--media-cache-size=1')
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--disk-cache-size=1048576')  # 1MB
+        chrome_options.add_argument('--media-cache-size=1048576')  # 1MB
         chrome_options.add_argument('--disable-applications-cache')
         
         return chrome_options
-        
-    def handle_proxy_auth(self):
-        try:
-            if not self.proxy_auth:
-                return False
-                
-            # Using CDP to handle authentication
-            self.driver.execute_cdp_cmd('Network.enable', {})
-            self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {
-                'Proxy-Authorization': f'Basic {base64.b64encode(f"{self.proxy_auth['username']}:{self.proxy_auth['password']}".encode()).decode()}'
-            }})
-            
-            # Set up authentication handler
-            self.driver.execute_cdp_cmd('Network.setRequestInterception', {'patterns': [{
-                'urlPattern': '*',
-                'resourceType': 'Document',
-                'interceptionStage': 'Request'
-            }]})
-            
-            print(f"[Worker {self.worker_id}] Proxy authentication set up successfully")
-            return True
-            
-        except Exception as e:
-            print(f"[Worker {self.worker_id}] Error setting up proxy authentication: {str(e)}")
-            return False        
 
     def create_driver(self):
         try:
@@ -164,13 +117,6 @@ class ChromeInstance:
             service = Service()
             self.driver = webdriver.Chrome(service=service, options=options)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
-            
-            # Handle proxy authentication before accessing any page
-            self.handle_proxy_auth()
-            
-            # Now try accessing Facebook
-            self.driver.get("https://www.facebook.com")
-                
             return self.driver
         except Exception as e:
             raise Exception(f"Lỗi khởi tạo Chrome WebDriver port {self.debug_port}: {str(e)}")
@@ -408,7 +354,7 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
         chrome_instance.driver.get(group_url)
         chrome_instance.url_monitor()
         
-        time.sleep(random.uniform(2, 3))
+        time.sleep(random.uniform(5, 6))
 
         def handle_popup():
             """Xử lý popup block"""
@@ -738,90 +684,22 @@ def main():
     print(f"Còn lại: {total_combinations - used_combinations} tổ hợp chưa sử dụng")
 
     chrome_instances = [
-            ChromeInstance(
-            debug_port=9222, 
-            worker_id=1, 
-            proxy_auth={'username': 'usr07ougOj1', 'password': 'passZXecUzV0'}
-        ),
-        ChromeInstance(
-            debug_port=9223, 
-            worker_id=2, 
-            proxy_auth={'username': 'user2', 'password': 'pass2'}
-        ),
-        ChromeInstance(
-            debug_port=9224, 
-            worker_id=3, 
-            proxy_auth={'username': 'user3', 'password': 'pass3'}
-        ),
-        ChromeInstance(
-            debug_port=9225, 
-            worker_id=4, 
-            proxy_auth={'username': 'user4', 'password': 'pass4'}
-        ),
-        ChromeInstance(
-            debug_port=9226, 
-            worker_id=5, 
-            proxy_auth={'username': 'user5', 'password': 'pass5'}
-        ),
-        ChromeInstance(
-            debug_port=9227, 
-            worker_id=6, 
-            proxy_auth={'username': 'user6', 'password': 'pass6'}
-        ),
-        ChromeInstance(
-            debug_port=9228, 
-            worker_id=7, 
-            proxy_auth={'username': 'user7', 'password': 'pass7'}
-        ),
-        ChromeInstance(
-            debug_port=9229, 
-            worker_id=8, 
-            proxy_auth={'username': 'user8', 'password': 'pass8'}
-        ),
-        ChromeInstance(
-            debug_port=9230, 
-            worker_id=9, 
-            proxy_auth={'username': 'user9', 'password': 'pass9'}
-        ),
-        ChromeInstance(
-            debug_port=9231, 
-            worker_id=10, 
-            proxy_auth={'username': 'user10', 'password': 'pass10'}
-        ),
-        ChromeInstance(
-            debug_port=9232, 
-            worker_id=11, 
-            proxy_auth={'username': 'user11', 'password': 'pass11'}
-        ),
-        ChromeInstance(
-            debug_port=9233, 
-            worker_id=12, 
-            proxy_auth={'username': 'user12', 'password': 'pass12'}
-        ),
-        ChromeInstance(
-            debug_port=9234, 
-            worker_id=13, 
-            proxy_auth={'username': 'user13', 'password': 'pass13'}
-        ),
-        ChromeInstance(
-            debug_port=9235, 
-            worker_id=14, 
-            proxy_auth={'username': 'user14', 'password': 'pass14'}
-        ),
-        ChromeInstance(
-            debug_port=9236, 
-            worker_id=15, 
-            proxy_auth={'username': 'user15', 'password': 'pass15'}
-        )
+        ChromeInstance(debug_port=9222, worker_id=1),
+        ChromeInstance(debug_port=9223, worker_id=2),
+        ChromeInstance(debug_port=9224, worker_id=3),
+        ChromeInstance(debug_port=9225, worker_id=4),
+        ChromeInstance(debug_port=9226, worker_id=5),
+        ChromeInstance(debug_port=9227, worker_id=6),
+        ChromeInstance(debug_port=9228, worker_id=7),
+        ChromeInstance(debug_port=9229, worker_id=8),
+        ChromeInstance(debug_port=9230, worker_id=9),
+        ChromeInstance(debug_port=9231, worker_id=10),
+        ChromeInstance(debug_port=9232, worker_id=11),
+        ChromeInstance(debug_port=9233, worker_id=12),
+        ChromeInstance(debug_port=9234, worker_id=13),
+        ChromeInstance(debug_port=9235, worker_id=14),
+        ChromeInstance(debug_port=9236, worker_id=15)
     ]
-    
-    # Sử dụng workers
-    for instance in chrome_instances:
-        try:
-            instance.create_driver()
-            # Thực hiện các công việc khác với worker
-        except Exception as e:
-            print(f"Lỗi khởi tạo worker {instance.worker_id}: {str(e)}")
 
     lock = threading.Lock()
 
