@@ -83,6 +83,21 @@ class ChromeInstance:
     def setup_chrome_driver(self):
         chrome_options = Options()
         chrome_options.add_experimental_option("debuggerAddress", f"127.0.0.1:{self.debug_port}")
+            
+        # Thêm extension proxy
+        if proxy:
+            # Đường dẫn đến thư mục chứa extension
+            extension_path = os.path.abspath("proxy_extension")
+            chrome_options.add_argument(f'--load-extension={extension_path}')
+            
+            # Tạo URL với thông tin proxy
+            proxy_host, proxy_port, proxy_user, proxy_pass = proxy.split(':')
+            proxy_url = f"https://facebook.com/?proxyauth={proxy_host}:{proxy_port}:{proxy_user}:{proxy_pass}"
+            
+            # Lưu URL proxy để sử dụng sau
+            self.proxy_url = proxy_url
+        
+        chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
@@ -117,6 +132,12 @@ class ChromeInstance:
             service = Service()
             self.driver = webdriver.Chrome(service=service, options=options)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+            
+            # Nếu có proxy, mở URL proxy để kích hoạt extension
+            if hasattr(self, 'proxy_url'):
+                self.driver.get(self.proxy_url)
+                time.sleep(2)  # Đợi extension load xong            
+            
             return self.driver
         except Exception as e:
             raise Exception(f"Lỗi khởi tạo Chrome WebDriver port {self.debug_port}: {str(e)}")
@@ -665,8 +686,8 @@ def save_progress(processed_items, processed_groups, output_dir):
         }, f)
 
 def main():
-    input_file = r'C:\Users\Martech 15\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Martech 15\Downloads\Tìm Group Công Khai\output'
+    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
+    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -682,9 +703,16 @@ def main():
     print(f"Tổng số tổ hợp có thể: {total_combinations}")
     print(f"Số tổ hợp đã sử dụng: {used_combinations}")
     print(f"Còn lại: {total_combinations - used_combinations} tổ hợp chưa sử dụng")
+    
+    proxies = [
+        "104.238.144.113:10015:usr07ougOj1:passZXecUzV0",  # proxy cho worker 1
+        "104.238.144.114:10015:usr07ougOj2:passZXecUzV1",  # proxy cho worker 2
+        "104.238.144.115:10015:usr07ougOj3:passZXecUzV2",  # proxy cho worker 3
+        # ... thêm các proxy khác
+    ]
 
     chrome_instances = [
-        ChromeInstance(debug_port=9222, worker_id=1),
+        ChromeInstance(debug_port=9222, worker_id=1).create_driver(proxy=proxies[0]),
         ChromeInstance(debug_port=9223, worker_id=2),
         ChromeInstance(debug_port=9224, worker_id=3),
         ChromeInstance(debug_port=9225, worker_id=4),
