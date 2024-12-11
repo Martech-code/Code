@@ -126,7 +126,7 @@ class ChromeInstance:
         
         return chrome_options
 
-    def create_driver(self):
+    def create_driver(self, proxy=None):
         try:
             options = self.setup_chrome_driver()
             service = Service()
