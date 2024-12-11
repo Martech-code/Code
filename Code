@@ -665,8 +665,8 @@ def save_progress(processed_items, processed_groups, output_dir):
         }, f)
 
 def main():
-    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
+    input_file = r'C:\Users\Martech 15\Downloads\Tìm Group Công Khai\Keyword.txt'
+    output_dir = r'C:\Users\Martech 15\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
 
