@@ -4,6 +4,7 @@ import random
 import json
 import csv
 import re
+import base64
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -14,6 +15,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException, NoS
 from collections import defaultdict, deque
 from typing import Dict, List
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import os
 import threading
 import math
@@ -40,55 +42,33 @@ class ChromeInstance:
     def __init__(self, debug_port, worker_id, proxy_auth=None):
             self.debug_port = debug_port
             self.worker_id = worker_id
-            self.proxy_auth = proxy_auth  # Format: {'username': 'user', 'password': 'pass'}
-            self.proxy_auth_done = False  # Flag kiểm tra đã xác thực proxy chưa
+            # Extract proxy auth from URL format
+            self.proxy_auth = self.extract_proxy_auth()
             self.driver = None
             self.processed_count = 0
             self.is_checkpoint = False
             self.is_blocked = False
             self.processed_groups = set()
             self.collected_urls = []
-            self.failed_urls = []     
-        
-    def handle_proxy_auth_popup(self):
+            self.failed_urls = []
+            
+    def extract_proxy_auth(self):
         try:
-            if not self.proxy_auth or self.proxy_auth_done:
-                return True
-                
-            time.sleep(2)  # Đợi popup xuất hiện
-            
-            # Chuyển sang alert window
-            alert = self.driver.switch_to.alert
-            
-            # Kiểm tra và điền thông tin xác thực
-            if isinstance(self.proxy_auth, dict):
-                username = self.proxy_auth.get('username', '')
-                password = self.proxy_auth.get('password', '')
-                
-                # Nhập username và password vào popup
-                alert.send_keys(f"{username}\t{password}")
-                time.sleep(0.5)
-                alert.accept()
-                
-                # Đánh dấu đã xác thực
-                self.proxy_auth_done = True
-                print(f"[Worker {self.worker_id}] Xác thực proxy thành công với user: {username}")
-                return True
-                
+            # Wait for the page to load
+            time.sleep(2)
+            current_url = self.driver.current_url if self.driver else ""
+            if "proxyauth=" in current_url:
+                auth_part = current_url.split("proxyauth=")[1].split(":")
+                if len(auth_part) == 4:
+                    return {
+                        'host': auth_part[0],
+                        'port': auth_part[1],
+                        'username': auth_part[2],
+                        'password': auth_part[3]
+                    }
         except Exception as e:
-            print(f"[Worker {self.worker_id}] Lỗi xử lý popup xác thực proxy: {str(e)}")
-            return False
-
-    def wait_for_proxy_auth_popup(self, timeout=10):
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                # Kiểm tra popup
-                alert = self.driver.switch_to.alert
-                return True
-            except:
-                time.sleep(0.5)
-        return False
+            print(f"[Worker {self.worker_id}] Error extracting proxy auth: {str(e)}")
+        return None
         
     def save_progress(self, keyword, urls, current_index, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
@@ -125,6 +105,20 @@ class ChromeInstance:
     def setup_chrome_driver(self):
         chrome_options = Options()
         chrome_options.add_experimental_option("debuggerAddress", f"127.0.0.1:{self.debug_port}")
+        
+        # Add proxy authentication capabilities
+        if self.proxy_auth:
+            capabilities = webdriver.DesiredCapabilities.CHROME.copy()
+            capabilities['proxy'] = {
+                'httpProxy': f"{self.proxy_auth['host']}:{self.proxy_auth['port']}",
+                'sslProxy': f"{self.proxy_auth['host']}:{self.proxy_auth['port']}",
+                'proxyType': 'MANUAL',
+            }
+            capabilities['proxy']['socksUsername'] = self.proxy_auth['username']
+            capabilities['proxy']['socksPassword'] = self.proxy_auth['password']
+            chrome_options.set_capability('proxy', capabilities['proxy'])
+
+        
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
@@ -138,6 +132,31 @@ class ChromeInstance:
         chrome_options.add_argument('--disable-applications-cache')
         
         return chrome_options
+        
+    def handle_proxy_auth(self):
+        try:
+            if not self.proxy_auth:
+                return False
+                
+            # Using CDP to handle authentication
+            self.driver.execute_cdp_cmd('Network.enable', {})
+            self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {
+                'Proxy-Authorization': f'Basic {base64.b64encode(f"{self.proxy_auth['username']}:{self.proxy_auth['password']}".encode()).decode()}'
+            }})
+            
+            # Set up authentication handler
+            self.driver.execute_cdp_cmd('Network.setRequestInterception', {'patterns': [{
+                'urlPattern': '*',
+                'resourceType': 'Document',
+                'interceptionStage': 'Request'
+            }]})
+            
+            print(f"[Worker {self.worker_id}] Proxy authentication set up successfully")
+            return True
+            
+        except Exception as e:
+            print(f"[Worker {self.worker_id}] Error setting up proxy authentication: {str(e)}")
+            return False        
 
     def create_driver(self):
         try:
@@ -146,19 +165,11 @@ class ChromeInstance:
             self.driver = webdriver.Chrome(service=service, options=options)
             self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
             
-            # Truy cập facebook để trigger proxy auth popup
-            print(f"[Worker {self.worker_id}] Truy cập Facebook để xác thực proxy...")
-            self.driver.get("https://www.facebook.com")
+            # Handle proxy authentication before accessing any page
+            self.handle_proxy_auth()
             
-            # Xử lý popup xác thực proxy
-            if self.proxy_auth and not self.proxy_auth_done:
-                if self.wait_for_proxy_auth_popup():
-                    if self.handle_proxy_auth_popup():
-                        time.sleep(2)
-                        # Tải lại trang sau khi xác thực
-                        self.driver.refresh()
-                    else:
-                        raise Exception("Không thể xác thực proxy")
+            # Now try accessing Facebook
+            self.driver.get("https://www.facebook.com")
                 
             return self.driver
         except Exception as e:
