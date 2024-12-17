@@ -257,7 +257,7 @@ class FacebookAdsLibrary:
         scroll_pause_time = 5
         last_height = self.driver.execute_script("return document.body.scrollHeight")
         no_new_content_count = 0
-        max_no_new_content = 3
+        max_no_new_content = 8
         
         # Load existing IDs at start
         self.processed_ids = self.load_processed_ids(output_path)
@@ -339,6 +339,15 @@ class FacebookAdsLibrary:
                 
                 if new_ads_processed > 0:
                     print(f"Successfully processed {new_ads_processed} new ads")
+                    no_new_content_count = 0  # Reset counter chỉ khi có ads mới
+                else:
+                    no_new_content_count += 1
+                    print(f"No new content found. Count: {no_new_content_count}")
+                    
+                if no_new_content_count >= max_no_new_content:
+                    print("Reached maximum attempts without new content")
+                    self.flush_buffer_to_excel(output_path)
+                    return
                 
                 print("Scrolling to bottom of page...")
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -349,23 +358,12 @@ class FacebookAdsLibrary:
                 
                 new_height = self.driver.execute_script("return document.body.scrollHeight")
                 
-                if new_ads_processed == 0:
-                    no_new_content_count += 1
-                    print(f"No new content found. Count: {no_new_content_count}")
-                else:
-                    no_new_content_count = 0
-                
-                if new_height == last_height or no_new_content_count >= max_no_new_content:
-                    print("Checking if reached end of content...")
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(scroll_pause_time)
+                # Kiểm tra nếu đã đến cuối trang
+                if new_height == last_height:
+                    print("Reached end of page")
+                    self.flush_buffer_to_excel(output_path)
+                    return
                     
-                    newest_height = self.driver.execute_script("return document.body.scrollHeight")
-                    if newest_height == new_height:
-                        print("Reached end of page or no new content")
-                        self.flush_buffer_to_excel(output_path)
-                        break
-                
                 last_height = new_height
                 
             except Exception as e:
