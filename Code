@@ -1,555 +1,123 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
-import time
-import pandas as pd
-import os
-import random
-import json
-from datetime import datetime, timedelta
-from urllib.parse import quote
+Sống thuận tự nhiên
 
-class FacebookAdsLibrary:
-    def __init__(self):
-        self.chrome_options = Options()
-        self.chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9225")
-        self.chrome_options.add_argument('--disable-gpu')
-        self.chrome_options.add_argument('--no-sandbox')
-        self.chrome_options.add_argument('--disable-dev-shm-usage')
-        self.chrome_options.add_argument('--memory-pressure-off')
-        self.chrome_options.add_argument('--disk-cache-size=1')
-        self.chrome_options.add_argument('--media-cache-size=1')
-        self.chrome_options.add_argument('--disable-applications-cache')
-        self.service = Service()
-        self.driver = None
-        self.tracking_file = os.path.join("Downloads", "Ads Library Analysis", "tracking.json")
-        self.tracking_data = self.load_tracking_data()
-        self.current_keyword = None
-        self.temp_data_buffer = []
-        self.buffer_size = 100
-        self.processed_ids = set()
+Sống thuận tự nhiên là như thế nào?
+và ý nghĩa cuộc đời này là gì?
 
-    def load_tracking_data(self):
-        print("Loading tracking data...")
-        if os.path.exists(self.tracking_file):
-            with open(self.tracking_file, 'r', encoding='utf-8') as f:
-                print("Tracking data loaded successfully")
-                return json.load(f)
-        print("No existing tracking data found")
-        return {}
+Để diễn giải được, như thế nào là sống thuận tự nhiên, thì tôi đố anh em gú-gồ được câu trả lời. Gú gồ một hồi là rối ngay, mỗi ông nói một kiểu khác nhau. Vì có cố gắng giải thích như thế nào đi nữa thì nó cũng dễ trật.
 
-    def save_tracking_data(self):
-        print("Saving tracking data...")
-        with open(self.tracking_file, 'w', encoding='utf-8') as f:
-            json.dump(self.tracking_data, f, indent=4, ensure_ascii=False)
-        print("Tracking data saved successfully")
+Anh em biết tại sao không?
 
-    def load_processed_ids(self, output_path):
-        if os.path.exists(output_path):
-            df = pd.read_excel(output_path)
-            return set(df['library_id'].tolist())
-        return set()
+Bởi vì, làm gì có khái niệm 'sống thuận tự nhiên',
 
-    def flush_buffer_to_excel(self, output_path):
-        if not self.temp_data_buffer:
-            return
+dưới bầu trời này, 'thuận' hay 'nghịch' nó đều nằm trong tự nhiên hết. Có nghĩa là, cái mà anh em đang xem là 'nghịch' đi nữa, nó cũng là một phần của tự nhiên. Khi cái gì tồn tại thì nó có ý nghĩa riêng của nó, hoặc nói sâu hơn, nó là một phần của dòng chảy nhân-duyên-quả đang diễn ra vô tận.
 
-        print(f"Flushing {len(self.temp_data_buffer)} records to Excel...")
-        columns = [
-            'keyword', 'library_id', 'runtime', 'page_name', 'ad_status',
-            'ads_using_content', 'content', 'Button_CTA', 'Link_CTA', 'has_video', 'video_url'
-        ]
+Chia thành 2 phần, thuận & nghịch, là do tư tưởng của chúng ta khái niệm lên. Nó cũng không sai nhưng nó rất tương đối, vì sẽ đúng với người này, nhưng lại không chuẩn với người kia.
 
-        new_df = pd.DataFrame(self.temp_data_buffer)
-        
-        if os.path.exists(output_path):
-            with pd.ExcelWriter(output_path, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
-                start_row = writer.sheets['Sheet1'].max_row
-                new_df.to_excel(writer, index=False, header=False, startrow=start_row)
-        else:
-            new_df = new_df[columns]
-            new_df.to_excel(output_path, index=False)
+'Tự nhiên', không định nghĩa một sự kiện nào là thuận hay nghịch, hoặc là thiện hay ác,
 
-        self.temp_data_buffer = []
-        print("Buffer flushed successfully")
+Dòng chảy tự nhiên chỉ vận hành đúng trên một quy luật mà thôi,
+đó là 'gieo nhân nào thì gặt quả đó'.
 
-    def parse_runtime(self, runtime_text):
-        print(f"Parsing runtime text: {runtime_text}")
-        try:
-            # Xử lý các trường hợp có dấu gạch ngang (-)
-            if " - " in runtime_text:
-                start_date = runtime_text.split(" - ")[0].strip()
-            else:
-                # Loại bỏ các phần text không cần thiết
-                start_date = (runtime_text.replace("Đã bắt đầu chạy ", "")
-                                  .replace("vào ", "")
-                                  .replace("Ngày bắt đầu chạy: ", "")
-                                  .replace("Started running on ", ""))
+Gieo hạt sầu riêng thì sẽ ra trái sầu riêng,
+Gieo hạt xoài thì sẽ ra trái xoài,
+Chứ không có cách nào mà gieo hạt sầu riêng mà ra quả xoài được.
 
-            # Loại bỏ phần thời gian hoạt động nếu có
-            if "·" in start_date:
-                start_date = start_date.split("·")[0].strip()
+Nên anh em phải cực kỳ tỉnh táo ở điểm này,
 
-            try:
-                # Thử parse theo định dạng "MMM dd, yyyy"
-                if "," in start_date:
-                    return datetime.strptime(start_date, "%b %d, %Y")
-            except:
-                pass
+Tự nhiên, không phân biệt cái gì thiện, cái gì ác, nhưng vẫn phải tuân theo cái quy luật trên,
+anh em gieo nhân thiện thì sẽ có quả thiện,
+anh em gieo nhân ác thì sẽ có quả ác,
 
-            try:
-                # Thử parse theo định dạng "MMM dd yyyy" 
-                if len(start_date.split()) == 3:
-                    return datetime.strptime(start_date, "%b %d %Y")
-            except:
-                pass
+với chúng ta thì sẽ phân thành thiện ác, là để dễ giao tiếp bằng ngôn ngữ và quy ước chung với nhau. Chứ với dòng chảy tự nhiên, thì nó không quan tâm cái đó là gì, nó chỉ biết là, nhân đó thì sẽ ra quả đó.
 
-            # Xử lý định dạng tiếng Việt: "6 Tháng 12, 2024"
-            if "Tháng" in start_date:
-                date_parts = start_date.split()
-                day = int(date_parts[0])
-                month = int(date_parts[2].replace(',', ''))
-                year = int(date_parts[3])
-                return datetime(year, month, day)
+Nó giống như cái máy ép vậy đó,
+đưa cây mía vào thì ra nước mía,
+còn đưa cái tay vào thì ra nước máu,
 
-            # Xử lý định dạng tiếng Việt rút gọn: "6 thg 12, 2024"
-            elif "thg" in start_date:
-                return datetime.strptime(start_date, "%d thg %m, %Y")
+anh em hiểu khúc này chưa?
 
-            print(f"Could not parse date format: {start_date}")
-            return None
+Hiểu ra thì phải biết sợ từ từ đi, vì anh em toàn đúc tay chân vào máy ép thì hỏi sao cứ trách ông Trời là đời tôi khổ quá.
 
-        except Exception as e:
-            print(f"Error parsing runtime: {e} for text: {runtime_text}")
-            return None
+Do đó, không có cái khái niệm sống thuận hay sống nghịch với tự nhiên. Mà nó sẽ là:
 
-    def setup_driver(self):
-        print("Setting up Chrome driver...")
-        try:
-            self.driver = webdriver.Chrome(service=self.service, options=self.chrome_options)
-            print("Chrome driver setup successful")
-            return True
-        except Exception as e:
-            print(f"Error setting up driver: {e}")
-            return False
+khi anh em gieo nhân sống nghịch thì nó ra quả tương ứng,
+và ngược lại, anh em gieo nhân sống thuận thì nó ra quả tương ứng theo thuận.
 
-    def extract_ad_data(self, ad_element, keyword):
-                    print("Extracting ad data...")
-                    ad_data = {'keyword': keyword}
-                    
-                    try:
-                        try:
-                            # Trích xuất library_id theo thẻ div và class chính xác
-                            library_id_element = ad_element.find_element(
-                                By.CSS_SELECTOR, "div.xt0e3qv div.x1rg5ohu.x67bb7w span.x8t9es0.xw23nyj.xo1l8bm.x63nzvj.x108nfp6.xq9mrsl.x1h4wwuj.xeuugli"
-                            )
-                            ad_data['library_id'] = library_id_element.text.replace("Library ID: ", "")
-                            print(f"Extracted library ID: {ad_data['library_id']}")
-                        except:
-                            ad_data['library_id'] = "N/A"
-                        
-                        try:
-                            # Trích xuất runtime theo thẻ div chứa thông tin thời gian
-                            runtime_element = ad_element.find_element(
-                                By.CSS_SELECTOR, "div.x3nfvp2.x1e56ztr > span.x8t9es0.xw23nyj.xo1l8bm.x63nzvj.x108nfp6.xq9mrsl.x1h4wwuj.xeuugli:not(.x1emribx):not(.x117nqv4)"
-                            )
-                            ad_data['runtime'] = runtime_element.text
-                            print(f"Extracted runtime: {ad_data['runtime']}")
-                        except:
-                            ad_data['runtime'] = "N/A"
+Anh em ăn nhiều đường lâu ngày thì sẽ tăng nguy cơ bị bệnh tiểu đường nhiều hơn. Ăn mặn nhiều thì khả năng bị huyết áp cao.
+Còn anh em ăn uống tiết chế thì cái quả nhận được là ít bệnh nền sau này.
 
-                        try:
-                            ad_data['page_name'] = ad_element.find_element(
-                                By.XPATH, ".//a[contains(@class, 'xt0psk2')]//span"
-                            ).text
-                            print(f"Extracted page name: {ad_data['page_name']}")
-                        except:
-                            ad_data['page_name'] = "N/A"
-                        
-                        try:
-                            ad_data['ad_status'] = ad_element.find_element(
-                                By.CLASS_NAME, "x117nqv4"
-                            ).text
-                            print(f"Extracted ad status: {ad_data['ad_status']}")
-                        except:
-                            ad_data['ad_status'] = "N/A"
+Nên việc cố định nghĩa, thuận tự nhiên là gì, hay nghịch tự nhiên là gì, thật ra nó lại không quan trọng bằng việc anh em có ý thức được rằng, mình đang muốn gieo nhân gì và muốn nhận quả gì hay không.
 
-                        try:
-                            versions_text = ad_element.find_element(
-                                By.XPATH, ".//span[contains(@class, 'x1fvot60')]//strong"
-                            ).text
-                            ad_data['ads_using_content'] = versions_text
-                            print(f"Extracted ads using content: {ad_data['ads_using_content']}")
-                        except:
-                            ad_data['ads_using_content'] = "N/A"
-                        
-                        try:
-                            ad_data['content'] = ad_element.find_element(
-                                By.CLASS_NAME, "_7jyr"
-                            ).text
-                            print("Extracted ad content")
-                        except:
-                            ad_data['content'] = "N/A"
-                        
-                        try:
-                            # Tìm tất cả các button CTA
-                            cta_elements = ad_element.find_elements(
-                                By.XPATH, ".//div[contains(@class, 'x8t9es0') and contains(@class, 'xuxw1ft') and contains(@class, 'x10wlt62')]"
-                            )
-                            # Lấy text của button cuối cùng
-                            if len(cta_elements) > 0:
-                                ad_data['Button_CTA'] = cta_elements[-1].text
-                            else:
-                                ad_data['Button_CTA'] = "None"
-                            print(f"Extracted CTA button: {ad_data['Button_CTA']}")
-                        except:
-                            ad_data['Button_CTA'] = "None"
-                        
-                        try:
-                            link_cta_elements = ad_element.find_elements(
-                                By.XPATH, ".//div[contains(@class, 'x1iyjqo2') and contains(@class, 'xw3qccf')]//div[@class='_4ik4 _4ik5']"
-                            )
-                            # Lấy text từ các phần tử không rỗng
-                            cta_texts = [elem.text for elem in link_cta_elements if elem.text.strip()]
-                            
-                            # Kết hợp các text tìm được
-                            ad_data['Link_CTA'] = ' | '.join(cta_texts)
-                            print(f"Extracted Link CTA: {ad_data['Link_CTA']}")
-                        except:
-                            ad_data['Link_CTA'] = "None" 
-                            print("No Link CTA found")
-                        
-                        try:
-                            video = ad_element.find_element(By.TAG_NAME, "video")
-                            ad_data['has_video'] = True
-                            ad_data['video_url'] = video.get_attribute('src')
-                            print("Found video content")
-                        except:
-                            ad_data['has_video'] = False
-                            ad_data['video_url'] = "N/A"
-                            
-                            
-                    except Exception as e:
-                        print(f"Error extracting data: {e}")
-                        
-                    return ad_data
+Cốt lõi nằm ở chỗ gieo nhân,
 
-    def should_continue_scrolling(self, runtime_text, target_date):
-        print(f"Checking if should continue scrolling for runtime: {runtime_text}")
-        if not runtime_text or runtime_text == "N/A":
-            return True
-            
-        runtime_date = self.parse_runtime(runtime_text)
-        if not runtime_date:
-            return True
-            
-        should_continue = runtime_date >= target_date
-        print(f"Should continue scrolling: {should_continue}")
-        return should_continue
+chứ tôi không có phân biệt thế nào là nhân thiện, thế nào là nhân bất thiện, cái đó cho anh em tự quan sát.
 
-    def scroll_and_extract(self, output_path):
-        print("Starting scroll and extract process...")
-        scroll_pause_time = 5
-        last_height = self.driver.execute_script("return document.body.scrollHeight")
-        no_new_content_count = 0
-        max_no_new_content = 8
-        
-        # Load existing IDs at start
-        self.processed_ids = self.load_processed_ids(output_path)
-        print(f"Loaded {len(self.processed_ids)} previously processed ads")
+Nếu không quan sát được thì anh em phải có trợ lực từ trí tuệ của những Bậc hiền triết đi trước, để mượn cái tuệ lý tưởng của họ rồi anh em copy làm theo... đến khi nào nó thành trí tuệ của anh em là tự quan sát được thôi.
 
-        target_date = None
-        if self.current_keyword in self.tracking_data:
-            first_runtime = datetime.strptime(self.tracking_data[self.current_keyword]['first_runtime'], "%Y-%m-%d")
-            target_date = first_runtime - timedelta(days=60)
-            print(f"Target date set to: {target_date}")
-        
-        # Theo dõi phần tử cuối cùng đã xử lý
-        last_processed_element = None
-        
-        while True:
-            try:
-                print("Waiting for ad elements to load...")
-                time.sleep(5)
-                
-                # Tìm tất cả các thẻ div chứa quảng cáo
-                ad_elements = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.xh8yej3"))
-                )
-                
-                # Xác định vị trí bắt đầu quét
-                start_index = 0
-                if last_processed_element:
-                    try:
-                        start_index = ad_elements.index(last_processed_element) + 1
-                    except ValueError:
-                        start_index = 0
-                
-                new_ads_processed = 0
-                
-                # Chỉ xử lý các phần tử mới
-                for ad_element in ad_elements[start_index:]:
-                    try:
-                        library_id = None
-                        try:
-                            library_id_element = ad_element.find_element(
-                                By.XPATH, ".//span[contains(text(),'Library ID:')]"
-                            )
-                            library_id = library_id_element.text.replace("Library ID: ", "")
-                        except:
-                            continue
-                        
-                        if library_id and library_id not in self.processed_ids:
-                            print(f"Processing new ad: {library_id}")
-                            ad_data = self.extract_ad_data(ad_element, self.current_keyword)
-                            self.processed_ids.add(library_id)
-                            new_ads_processed += 1
-                            
-                            if not target_date and ad_data['runtime'] != "N/A":
-                                runtime_date = self.parse_runtime(ad_data['runtime'])
-                                if runtime_date:
-                                    self.tracking_data[self.current_keyword] = {
-                                        'first_runtime': runtime_date.strftime("%Y-%m-%d"),
-                                        'target_date': (runtime_date - timedelta(days=60)).strftime("%Y-%m-%d")
-                                    }
-                                    self.save_tracking_data()
-                                    target_date = runtime_date - timedelta(days=60)
-                                    print(f"Updated target date to: {target_date}")
-                            
-                            if target_date and not self.should_continue_scrolling(ad_data['runtime'], target_date):
-                                print(f"Reached target date for keyword '{self.current_keyword}'")
-                                self.flush_buffer_to_excel(output_path)
-                                return
-                            
-                            self.temp_data_buffer.append(ad_data)
-                            if len(self.temp_data_buffer) >= self.buffer_size:
-                                self.flush_buffer_to_excel(output_path)
-                            
-                            # Cập nhật phần tử cuối cùng đã xử lý
-                            last_processed_element = ad_element
-                    
-                    except Exception as e:
-                        print(f"Error processing ad element: {e}")
-                        continue
-                
-                if new_ads_processed > 0:
-                    print(f"Successfully processed {new_ads_processed} new ads")
-                    no_new_content_count = 0  # Reset counter chỉ khi có ads mới
-                else:
-                    no_new_content_count += 1
-                    print(f"No new content found. Count: {no_new_content_count}")
-                    
-                if no_new_content_count >= max_no_new_content:
-                    print("Reached maximum attempts without new content")
-                    self.flush_buffer_to_excel(output_path)
-                    return
-                
-                print("Scrolling to bottom of page...")
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                print(f"Waiting for {scroll_pause_time} seconds...")
-                time.sleep(scroll_pause_time)
-                print("Adding random delay...")
-                time.sleep(random.uniform(0.5, 1.5))
-                
-                new_height = self.driver.execute_script("return document.body.scrollHeight")
-                
-                # Kiểm tra nếu đã đến cuối trang
-                if new_height == last_height:
-                    print("Reached end of page")
-                    self.flush_buffer_to_excel(output_path)
-                    return
-                    
-                last_height = new_height
-                
-            except Exception as e:
-                print(f"Error during scrolling: {e}")
-                print("Waiting 5 seconds before retrying...")
-                time.sleep(5)
-                continue
+Đó cũng là tại sao,
+Khi ngọn lửa tuệ của anh em chưa tự cháy được, thì anh em phải mồi lửa từ rất nhiều sách, từ rất nhiều Thầy, thực hành đủ trò, rồi giữ giới, tạo thói quen mới, để làm gì?
+---> Cốt lõi là để anh em tự quan sát được cái thân tâm này đang gieo nhân gì thế.
 
-    def process_keyword(self, keyword, output_path):
-        try:
-            print(f"\nProcessing keyword: {keyword}")
-            self.current_keyword = keyword
-            
-            # Check if keyword is already completed
-            if keyword in self.tracking_data and 'completed' in self.tracking_data[keyword]:
-                print(f"Keyword '{keyword}' already completed. Skipping...")
-                return
-                
-            encoded_keyword = quote(keyword)
-            url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&content_languages[0]=en&country=US&is_targeted_country=false&media_type=video&q={encoded_keyword}&search_type=keyword_unordered"
-            
-            print(f"Navigating to URL: {url}")
-            self.driver.get(url)
-            print("Waiting 5 seconds for page load...")
-            time.sleep(5)
-            
-            self.scroll_and_extract(output_path)
-            
-            # Mark keyword as completed
-            if keyword not in self.tracking_data:
-                self.tracking_data[keyword] = {}
-            self.tracking_data[keyword]['completed'] = True
-            self.save_tracking_data()
-            
-            print(f"Completed processing keyword '{keyword}'")
-            
-        except Exception as e:
-            print(f"Error processing keyword '{keyword}': {e}")
+Rốt ráo là vậy,
 
-    def clear_browser_data(self):
-        """Clear all browser data including cookies, cache, and history."""
-        print("Clearing browser data...")
-        try:
-            # Đóng tất cả tab không cần thiết trước
-            original_window = self.driver.current_window_handle
-            for handle in self.driver.window_handles:
-                if handle != original_window:
-                    self.driver.switch_to.window(handle)
-                    self.driver.close()
-            self.driver.switch_to.window(original_window)
+Còn nói một cách tương đối, nếu tôi phải định nghĩa thế nào là thuận tự nhiên thì tôi sẽ chọn định nghĩa vế ngược lại, "vậy thế nào là không thuận ?!"
 
-            # Xóa bộ nhớ cache của trình duyệt
-            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
-            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
-            
-            # Xóa dữ liệu storage và force garbage collection
-            self.driver.execute_script("""
-                window.localStorage.clear();
-                window.sessionStorage.clear();
-                var cookies = document.cookie.split(';');
-                for (var i = 0; i < cookies.length; i++) {
-                    var cookie = cookies[i];
-                    var eqPos = cookie.indexOf('=');
-                    var name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
-                    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
-                }
-                
-                // Force garbage collection nếu có thể
-                if (window.performance && window.performance.memory) {
-                    try {
-                        window.performance.memory.gc && window.performance.memory.gc();
-                    } catch(e) {
-                        // Ignore if gc is not available
-                    }
-                }
-            """)
-            
-            # Xóa cookies
-            self.driver.delete_all_cookies()
-            
-            # Thiết lập giới hạn bộ nhớ cho page
-            self.driver.execute_cdp_cmd('Network.enable', {})
-            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            })
-            
-            # Thực hiện thêm các bước để giảm memory usage
-            self.driver.execute_script("""
-                // Xóa các biến không sử dụng
-                for (var prop in window) {
-                    if (window.hasOwnProperty(prop) && prop !== 'performance') {
-                        try {
-                            delete window[prop];
-                        } catch(e) {}
-                    }
-                }
-                // Clear console
-                console.clear();
-            """)
-            
-            # Refresh trang
-            self.driver.refresh()
-            
-            print("Browser data cleared successfully")
-            
-        except Exception as e:
-            print(f"Error clearing browser data: {e}")
-            # Tiếp tục thực hiện mặc dù có lỗi
-        
-        # Verify cookies
-        remaining_cookies = self.driver.get_cookies()
-        if remaining_cookies:
-            print(f"Warning: {len(remaining_cookies)} cookies still remain")
-        else:
-            print("All cookies have been cleared")
+Anh em nhận thức gì, làm gì, gieo nhân gì... nếu cái quả anh em đang nhận là phiền não, khổ đau, thân tâm bệnh tật... thì đó là một tín hiệu để dễ nhận ra rằng, anh em đang sống không thuận với dòng chảy tự nhiên đó.
 
-        # Kiểm tra memory usage
-        memory_info = self.driver.execute_script("""
-            return window.performance.memory ? {
-                totalJSHeapSize: window.performance.memory.totalJSHeapSize,
-                usedJSHeapSize: window.performance.memory.usedJSHeapSize,
-                jsHeapSizeLimit: window.performance.memory.jsHeapSizeLimit
-            } : null;
-        """)
-        
-        if memory_info:
-            print(f"Memory usage: {memory_info}")
+Cho nên, người nào 'nhạy cảm với khổ' càng tốt thì rất dễ quan sát cái tôi đang nói. Nghĩa là, mỗi lần mình khổ một chuyện gì thì mình chỉ đặt một câu hỏi thôi, là "mình đã gieo nhân gì mà sao lại nhận quả như thế này"
 
-        # Thực hiện force garbage collection thông qua CDP
-        try:
-            self.driver.execute_cdp_cmd('HeapProfiler.collectGarbage', {})
-        except:
-            pass
-        
-    def process_keyword_files(self):
-        print("Starting to process keyword files...")
-        try:
-            ads_library_dir = os.path.join("Downloads", "Ads Library Analysis")
-            txt_files = [f for f in os.listdir(ads_library_dir) if f.endswith('.txt')]
-            
-            print(f"Found {len(txt_files)} text files to process")
-            for txt_file in txt_files:
-                txt_path = os.path.join(ads_library_dir, txt_file)
-                output_path = os.path.join(ads_library_dir, f"{os.path.splitext(txt_file)[0]}_results.xlsx")
-                
-                print(f"\nProcessing file: {txt_file}")
-                with open(txt_path, 'r', encoding='utf-8') as f:
-                    keywords = [line.strip() for line in f if line.strip()]
-                
-                print(f"Found {len(keywords)} keywords in {txt_file}")
-                for keyword in keywords:
-                    print(f"\nProcessing keyword: {keyword}")
-                    self.process_keyword(keyword, output_path)
-                    
-                    # Clear browser data after processing each keyword
-                    print("Clearing browser data before next keyword...")
-                    self.clear_browser_data()
-                    
-                    print("Waiting 2 seconds before next keyword...")
-                    time.sleep(2)
-                
-        except Exception as e:
-            print(f"Error processing keyword files: {e}")
+Nên việc tu thân, thiền định, niệm Phật, đọc Kinh, hay đạo gì đi nữa, nó cũng chỉ quay về đúng một việc, là quan sát được xem cái nhân gì mình đang gieo và tại sao mình lại gieo như thế.
 
-    def close(self):
-        print("Closing browser...")
-        if self.driver:
-            self.driver.quit()
-        print("Browser closed successfully")
+Thấy được hai cái đấy là anh em sẽ tăng trí tuệ nhanh lắm, tôi chắc chắn.
 
-def main():
-    print("Starting Facebook Ads Library Scraper...")
-    os.makedirs(os.path.join("Downloads", "Ads Library Analysis"), exist_ok=True)
-    print("Created necessary directories")
+Nên nói ngắn gọn nhất có thể, thì cái gì mà đang làm anh em khổ đau, thì đồng nghĩa là, trong nhận thức và hành vi của anh em đã và đang làm, có gì đó không thuận với tự nhiên đấy.
 
-    scraper = FacebookAdsLibrary()
-    print("Initialized scraper")
+Còn ý nghĩa cuộc đời này thì sao?
 
-    if not scraper.setup_driver():
-        print("Failed to setup driver. Exiting...")
-        return
+Tôi mò biết bao nhiêu sách rồi, không ra câu trả lời đâu nên anh em cứ gú gồ thoải mái... vì dòng chảy cuộc đời này nó chỉ vậy thôi, nên nó không có ý nghĩa gì cụ thể cả.
 
-    try:
-        scraper.process_keyword_files()
-    finally:
-        scraper.close()
+Cuộc đời có ý nghĩa thế nào, là trên chính tư tưởng và định nghĩa của cá nhân đó.
 
-if __name__ == "__main__":
-    main()
+Nên ý nghĩa cuộc đời của tôi, sẽ khác với ý nghĩa cuộc đời của vợ tôi... và cũng rất khác với tất cả anh em đang theo dõi Nghệ.
+Bởi vì, ý nghĩa mang tính cá nhân hoá, cho nên rất khó nói, ý nghĩa nào là mẫu số chung nhất cho tất cả.
+
+Do đó, anh em đọc gì, nghe gì, cũng phải tỉnh táo rằng, dù ai nói rằng, cuộc đời này thì mình phải sống như thế này, phải cống hiến như thế kia, rồi phải đạt chuyện A, buông được chuyện B, rồi đi đến chỗ C, v.v..
+
+Đúng, là nó rất ý nghĩa đó, nhưng chỉ đúng với người đó thôi,
+
+Có thể, cái ý nghĩa cuộc sống mà người đó đang nói, nó khớp với mục tiêu của phần đông mọi người, nên vô tình ai cũng xem nó thành ý nghĩa của cuộc đời mình luôn.
+
+Mà làm sao anh em có thể nói, ý nghĩa cuộc sống của người A là cao đẹp hơn của người B được,
+
+làm sao có thước đo nào, nói rằng hạnh phúc người này là nhiều hơn người kia... hoặc tình yêu của người này nhiều hơn người kia. Nói tương đối thì được, chứ tuyệt đối thì khó lắm.
+
+2 câu hỏi trong bài này nó sẽ mở ra rất nhiều nhận thức mới cho anh em nhưng có vài điều anh em phải tự nhắc liên tục, vì chúng ta rất hay quên.
+
+Một, anh em muốn gieo cái gì cũng được, nhưng phải hiểu rõ luật chơi, rằng gieo hạt A thì ra quả A, gieo hạt B thì ra quả B.
+Anh em làm tổn thương, gây phiền cho người khác thì cái quả trong tương lai sẽ tương ứng như thế.
+
+Cho nên, muốn ăn gì, chơi gì, làm gì, đi đâu, nghề gì, anh em cứ tự quyết, nhưng nhớ quan sát xem cái quả đang nhận là gì, để biết mà điều chỉnh cái nhân tiếp theo.
+
+Chứ đừng có suốt ngày ngồi băn khoăn xem, mình sống như vậy là có thuận hay nghịch với tự nhiên hay chưa... Nó làm anh em tốn thời gian lắm, mà anh em có thích tốn thời gian thì cũng ổn thôi, vì đó là cuộc đời của anh em.
+
+Hai, ý nghĩa cuộc đời như thế nào là do anh em tự định nghĩa lấy, vì nó chỉ ý nghĩa trong tư tưởng của anh em mà thôi. Nên cũng đừng cố đem định nghĩa lý tưởng của người khác rồi bắt mình phải sống theo như thế, là anh em đuối đấy.
+
+Mà có muốn sống như vậy, cũng được, miễn sao anh em thấy phù hợp với mình thôi, vẫn là gieo gì gặt đó. Nhiều anh em cứ cố gồng, sống quá áp lực, chỉ vì, phải sống thế này mới ý nghĩa chứ, tôi không dám ý kiến, vì anh em gieo gì thì sẽ gặt đó. Thích trò chơi áp lực mệt mỏi thì vô tư chơi thôi.
+
+Anh em nào mà thấm đến đây thì tự nhiên cuộc sống nó khoẻ lắm, bớt bị phân tâm hay kéo theo những cái định nghĩa lý tưởng của người khác về cuộc sống. Nhiều lúc lý tưởng nó cũng cao đẹp và đúng chứ... mà nó không dành cho anh em thì biết làm sao, cố quá thì quá cố.
+
+Muốn độc thân vui tính cũng tốt, thì học bài học của người độc thân,
+
+Muốn bước vào hôn nhân con cái, chơi trò chơi gia đình thì học bài học của hôn nhân gia đình.
+
+Muốn làm công, bớt nghĩ nhiều thì cứ làm công, đủ ăn, cũng ổn thôi.
+
+Muốn làm chủ, chơi trò chơi khởi nghiệp, làm giàu thì sẽ học bài học của làm chủ và làm giàu là như thế nào.
+
+Muốn đi tu, cầu giải thoát thì cứ đi tu để học bài học của xuất gia,
+
+Nói chung, muốn cái gì cũng được, nhưng vẫn trên nền của nhân-duyên-quả mà quan sát.
+
+Tất nhiên, anh em không chỉ sống một đời là xong, mà sự thật là đã có rất nhiều nhân cũ gieo trước đó rồi. Đến giờ thì nó trổ ra thôi, nên không phải cái gì muốn sửa ngay cũng sửa được, không phải cái gì muốn làm cũng được. Có khi quả trổ là phải cưới vợ sinh con rồi làm nghề A thì anh em phải theo dòng chảy của nó thôi, còn quyết định gieo nhân mới để trải nghiệm những bài học khác thì cứ thử chơi coi thế nào.
+
+Vậy đi, chúc anh em tìm được ý nghĩa của cuộc đời mình nhé, mà nhớ là, gieo gì thì gặt đó.
