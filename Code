@@ -1,97 +1,557 @@
-Cấu trúc tổng thể:
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+import time
+import pandas as pd
+import os
+import random
+import json
+from datetime import datetime, timedelta
+from urllib.parse import quote
 
-Phần mở đầu: Kỹ thuật móc câu và giữ chân Hook (Móc câu), Hướng dẫn thư giãn cơ thể
-Phần chính: Chia sẻ thông điệp
-Phần kết: Quay về hơi thở và tỉnh thức
+class FacebookAdsLibrary:
+    def __init__(self):
+        self.chrome_options = Options()
+        self.chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9225")
+        self.chrome_options.add_argument('--disable-gpu')
+        self.chrome_options.add_argument('--no-sandbox')
+        self.chrome_options.add_argument('--disable-dev-shm-usage')
+        self.chrome_options.add_argument('--memory-pressure-off')
+        self.chrome_options.add_argument('--disk-cache-size=1')
+        self.chrome_options.add_argument('--media-cache-size=1')
+        self.chrome_options.add_argument('--disable-applications-cache')
+        self.service = Service()
+        self.driver = None
+        self.tracking_file = os.path.join("Downloads", "Ads Library Analysis", "tracking.json")
+        self.tracking_data = self.load_tracking_data()
+        self.current_keyword = None
+        self.temp_data_buffer = []
+        self.buffer_size = 100
+        self.processed_ids = set()
 
-Kỹ thuật viết:
+    def load_tracking_data(self):
+        print("Loading tracking data...")
+        if os.path.exists(self.tracking_file):
+            with open(self.tracking_file, 'r', encoding='utf-8') as f:
+                print("Tracking data loaded successfully")
+                return json.load(f)
+        print("No existing tracking data found")
+        return {}
 
-A. Format câu văn:
+    def save_tracking_data(self):
+        print("Saving tracking data...")
+        with open(self.tracking_file, 'w', encoding='utf-8') as f:
+            json.dump(self.tracking_data, f, indent=4, ensure_ascii=False)
+        print("Tracking data saved successfully")
 
-Câu ngắn, thường 3-7 từ mỗi dòng
-Ngắt dòng tự nhiên theo nhịp thở
-Có khoảng trống giữa các ý để người đọc/nói có thời gian nghỉ
-Sử dụng dấu phẩy để tạo nhịp nghỉ tự nhiên
-Sử dụng cấu trúc "And as you..." để chuyển tiếp giữa các hướng dẫn
-Các câu xác nhận trải nghiệm: "You may notice...", "You might feel..."
+    def load_processed_ids(self, output_path):
+        if os.path.exists(output_path):
+            df = pd.read_excel(output_path)
+            return set(df['library_id'].tolist())
+        return set()
 
-B. Kỹ thuật dẫn dắt:
+    def flush_buffer_to_excel(self, output_path):
+        if not self.temp_data_buffer:
+            return
 
-Mở đầu:
-Hãy viết mở đầu theo hình thức "Hook and Hold Technique" - Kỹ thuật móc câu và giữ chân
-Hook (Móc câu):
-Đầu tiên: Đưa ra vấn đề một cách gợi mở
-Tạo sự tò mò, băn khoăn
-Chạm đến điểm đồng cảm của người nghe
-Sau đó: Pause (Tạm dừng có chủ đích):
-Yêu cầu tạm gác lại vấn đề
-Hướng dẫn thiền định
-Tạo không gian cho sự thư giãn
-Chào hỏi, tạo không gian thân quen
-Hướng dẫn tư thế
-Thả lỏng từng bộ phận cơ thể
-Đưa về hơi thở
+        print(f"Flushing {len(self.temp_data_buffer)} records to Excel...")
+        columns = [
+            'keyword', 'library_id', 'runtime', 'page_name', 'ad_status',
+            'ads_using_content', 'content', 'Button_CTA', 'Link_CTA', 'has_video', 'video_url'
+        ]
 
-PHẦN CHÍNH, PHẦN QUAN TRỌNG CẦN CHÚ Ý CHI TIẾT NHẤT NHƯ BÀI VIẾT ĐƯỢC ĐƯA RA:
-Bắt đầu bằng câu hỏi gợi mở
-BÁM SÁT HOÀN TOÀN NHỮNG CÂU TRUYỆN LIÊN QUAN NHƯ TRONG BÀI VIẾT ĐỂ NGƯỜI NGHE CÓ THỂ HIỂU SÂU SẮC TÌNH HUỐNG VÀ ĐỒNG CẢM.
-Rút ra bài học/thông điệp
-Kết nối với trải nghiệm cá nhân người nghe
-Để khoảng lặng cho người nghe nội tại hóa
+        new_df = pd.DataFrame(self.temp_data_buffer)
+        
+        if os.path.exists(output_path):
+            with pd.ExcelWriter(output_path, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
+                start_row = writer.sheets['Sheet1'].max_row
+                new_df.to_excel(writer, index=False, header=False, startrow=start_row)
+        else:
+            new_df = new_df[columns]
+            new_df.to_excel(output_path, index=False)
 
-Kết thúc:
-Quay về với hơi thở
-Thêm 3 hơi thở sâu có đếm
-Nhẹ nhàng kéo về thực tại
-Nhắc nhở bài học chính một lần nữa
-Lời cảm ơn và chúc phúc
-Nhắc nhở đây là món quà cho bản thân
+        self.temp_data_buffer = []
+        print("Buffer flushed successfully")
 
-C. Ngôn ngữ:
+    def parse_runtime(self, runtime_text):
+        print(f"Parsing runtime text: {runtime_text}")
+        try:
+            # Xử lý các trường hợp có dấu gạch ngang (-)
+            if " - " in runtime_text:
+                start_date = runtime_text.split(" - ")[0].strip()
+            else:
+                # Loại bỏ các phần text không cần thiết
+                start_date = (runtime_text.replace("Đã bắt đầu chạy ", "")
+                                  .replace("vào ", "")
+                                  .replace("Ngày bắt đầu chạy: ", "")
+                                  .replace("Started running on ", ""))
 
-Dùng từ ngữ đơn giản, gần gũi
-Giọng điệu ấm áp, thấu cảm
-Tránh giáo điều, áp đặt
-Sử dụng nhiều từ gợi cảm xúc tích cực
-Dùng "gently" để làm mềm các hướng dẫn
-Tôn trọng nhịp độ cá nhân của người thực hành
-Sử dụng câu dẫn dắt mang tính gợi ý hơn là chỉ dẫn
-Sử dụng các động từ cảm nhận: feeling, noticing, allowing...
-Thêm các từ ngữ về tình yêu thương, tha thứ
+            # Loại bỏ phần thời gian hoạt động nếu có
+            if "·" in start_date:
+                start_date = start_date.split("·")[0].strip()
 
-D. Yếu tố đặc biệt:
+            try:
+                # Thử parse theo định dạng "MMM dd, yyyy"
+                if "," in start_date:
+                    return datetime.strptime(start_date, "%b %d, %Y")
+            except:
+                pass
 
-Khoảng lặng có mục đích, để tạo cảm giác bình yên, không quá nhanh để tạo không gian cho người nghe suy ngẫm, nhưng cũng không được quá lâu để người nghe quên mất đi nội dung đang được đề cập. Tạo khoảng nghỉ tự nhiên, phù hợp với câu và nội dung chia sẻ làm sao cho người nghe có cảm xúc nhất. Khi viết, với những đoạn hướng dẫn người nghe thực hành, chúng ta hãy ngắt nghỉ làm sao để có khoảng dừng tương ứng phù hợp, điều đó có nghĩa là chúng ta cũng đang thực hành trực tiếp cùng người nghe. Tránh việc cứ nói dài mà không để cho người nghe có thời gian thở theo hướng dẫn.
+            try:
+                # Thử parse theo định dạng "MMM dd yyyy" 
+                if len(start_date.split()) == 3:
+                    return datetime.strptime(start_date, "%b %d %Y")
+            except:
+                pass
 
-Cú pháp để tạo khoảng dừng khi nói là sử dụng cú pháp <break time="x.xs" />, trong đó x.x là thời gian dừng tính bằng giây. X tối đa là 3s. Khoảng lặng ngắn chúng ta nên để 0.5 hoặc 0.8 từ đó tương ứng khoảng lặng dài hơn thì chúng ta nên để thời gian dài hơn.
-Trong trường hợp cần dừng lâu hơn chúng ta có thể thiết lập 2 lần break time
-Lưu ý: Khoảng lặng có mục đích phải theo ngữ điệu và nhịp điệu của tiếng Anh tự nhiên, chứ không phải câu nào chúng ta cũng để khoảng lặng.
+            # Xử lý định dạng tiếng Việt: "6 Tháng 12, 2024"
+            if "Tháng" in start_date:
+                date_parts = start_date.split()
+                day = int(date_parts[0])
+                month = int(date_parts[2].replace(',', ''))
+                year = int(date_parts[3])
+                return datetime(year, month, day)
 
-Hãy chú ý câu nội dung của văn bản, để chúng ta có thể linh hoạt đặt khoảng lặng làm sao khi nói được tự nhiên nhất, chứ không phải lúc nào cũng ngừng nghỉ mỗi khi ngắt 1 câu. Ngừng nghỉ liên tục vậy chỉ phù hợp khi đang hướng dẫn người nghe thiền sâu, còn lại chúng ta cần linh hoạt xử lý.
-Các khoảng lặng được đặt theo nhịp tự nhiên của lời nói, tập trung vào các điểm chuyển ý quan trọng và thời điểm cần người nghe thực hành theo.
+            # Xử lý định dạng tiếng Việt rút gọn: "6 thg 12, 2024"
+            elif "thg" in start_date:
+                return datetime.strptime(start_date, "%d thg %m, %Y")
 
-Một ví dụ cho một đoạn mở đầu của một bài có tên là Breaking Free: A Guided Journey to New Beginnings:
-Have you ever felt stuck in life's familiar patterns? <break time="1s" />
-Like a hamster running endlessly on its wheel, <break time="0.5s" />
-expending energy but going nowhere? <break time="1.5s" />
+            print(f"Could not parse date format: {start_date}")
+            return None
 
-Perhaps you've noticed that despite your best efforts, <break time="0.5s" />
-the same challenges keep repeating, <break time="0.5s" />
-the same frustrations return. <break time="1.5s" />
+        except Exception as e:
+            print(f"Error parsing runtime: {e} for text: {runtime_text}")
+            return None
 
-Today, we'll explore why these patterns persist, <break time="0.5s" />
-and more importantly, <break time="0.3s" />
-how to break free from them. <break time="1.5s" />
+    def setup_driver(self):
+        print("Setting up Chrome driver...")
+        try:
+            self.driver = webdriver.Chrome(service=self.service, options=self.chrome_options)
+            print("Chrome driver setup successful")
+            return True
+        except Exception as e:
+            print(f"Error setting up driver: {e}")
+            return False
 
-But first, let's create a space <break time="0.3s" />
-for clarity and insight. <break time="2s" />
+    def extract_ad_data(self, ad_element, keyword):
+                    print("Extracting ad data...")
+                    ad_data = {'keyword': keyword}
+                    
+                    try:
+                        try:
+                            # Trích xuất library_id theo thẻ div và class chính xác
+                            library_id_element = ad_element.find_element(
+                                By.CSS_SELECTOR, "div.xt0e3qv div.x1rg5ohu.x67bb7w span.x8t9es0.xw23nyj.xo1l8bm.x63nzvj.x108nfp6.xq9mrsl.x1h4wwuj.xeuugli"
+                            )
+                            ad_data['library_id'] = library_id_element.text.replace("Library ID: ", "")
+                            print(f"Extracted library ID: {ad_data['library_id']}")
+                        except:
+                            ad_data['library_id'] = "N/A"
+                        
+                        try:
+                            # Trích xuất runtime theo thẻ div chứa thông tin thời gian
+                            runtime_element = ad_element.find_element(
+                                By.CSS_SELECTOR, "div.x3nfvp2.x1e56ztr > span.x8t9es0.xw23nyj.xo1l8bm.x63nzvj.x108nfp6.xq9mrsl.x1h4wwuj.xeuugli:not(.x1emribx):not(.x117nqv4)"
+                            )
+                            ad_data['runtime'] = runtime_element.text
+                            print(f"Extracted runtime: {ad_data['runtime']}")
+                        except:
+                            ad_data['runtime'] = "N/A"
 
-Find a comfortable position, <break time="0.3s" />
-whether you're sitting or lying down. <break time="2s" />
+                        try:
+                            ad_data['page_name'] = ad_element.find_element(
+                                By.XPATH, ".//a[contains(@class, 'xt0psk2')]//span"
+                            ).text
+                            print(f"Extracted page name: {ad_data['page_name']}")
+                        except:
+                            ad_data['page_name'] = "N/A"
+                        
+                        try:
+                            ad_data['ad_status'] = ad_element.find_element(
+                                By.CLASS_NAME, "x117nqv4"
+                            ).text
+                            print(f"Extracted ad status: {ad_data['ad_status']}")
+                        except:
+                            ad_data['ad_status'] = "N/A"
 
-Gently close your eyes, <break time="2s" />
+                        try:
+                            versions_text = ad_element.find_element(
+                                By.XPATH, ".//span[contains(@class, 'x1fvot60')]//strong"
+                            ).text
+                            ad_data['ads_using_content'] = versions_text
+                            print(f"Extracted ads using content: {ad_data['ads_using_content']}")
+                        except:
+                            ad_data['ads_using_content'] = "N/A"
+                        
+                        try:
+                            ad_data['content'] = ad_element.find_element(
+                                By.CLASS_NAME, "_7jyr"
+                            ).text
+                            print("Extracted ad content")
+                        except:
+                            ad_data['content'] = "N/A"
+                        
+                        try:
+                            # Tìm tất cả các button CTA
+                            cta_elements = ad_element.find_elements(
+                                By.XPATH, ".//div[contains(@class, 'x8t9es0') and contains(@class, 'xuxw1ft') and contains(@class, 'x10wlt62')]"
+                            )
+                            # Lấy text của button cuối cùng
+                            if len(cta_elements) > 0:
+                                ad_data['Button_CTA'] = cta_elements[-1].text
+                            else:
+                                ad_data['Button_CTA'] = "None"
+                            print(f"Extracted CTA button: {ad_data['Button_CTA']}")
+                        except:
+                            ad_data['Button_CTA'] = "None"
+                        
+                        try:
+                            link_cta_elements = ad_element.find_elements(
+                                By.XPATH, ".//div[contains(@class, 'x1iyjqo2') and contains(@class, 'xw3qccf')]//div[@class='_4ik4 _4ik5']"
+                            )
+                            # Lấy text từ các phần tử không rỗng
+                            cta_texts = [elem.text for elem in link_cta_elements if elem.text.strip()]
+                            
+                            # Kết hợp các text tìm được
+                            ad_data['Link_CTA'] = ' | '.join(cta_texts)
+                            print(f"Extracted Link CTA: {ad_data['Link_CTA']}")
+                        except:
+                            ad_data['Link_CTA'] = "None" 
+                            print("No Link CTA found")
+                        
+                        try:
+                            video = ad_element.find_element(By.TAG_NAME, "video")
+                            ad_data['has_video'] = True
+                            ad_data['video_url'] = video.get_attribute('src')
+                            print("Found video content")
+                        except:
+                            ad_data['has_video'] = False
+                            ad_data['video_url'] = "N/A"
+                            
+                            
+                    except Exception as e:
+                        print(f"Error extracting data: {e}")
+                        
+                    return ad_data
 
-Take a deep breath in through your nose... <break time=1.5s" />
-and release it slowly through your mouth... <break time="2s" />
+    def should_continue_scrolling(self, runtime_text, target_date):
+        print(f"Checking if should continue scrolling for runtime: {runtime_text}")
+        if not runtime_text or runtime_text == "N/A":
+            return True
+            
+        runtime_date = self.parse_runtime(runtime_text)
+        if not runtime_date:
+            return True
+            
+        should_continue = runtime_date >= target_date
+        print(f"Should continue scrolling: {should_continue}")
+        return should_continue
 
-HÃY VIẾT ĐẦY ĐỦ CHI TIẾT, KHÔNG CẦN CHÚ THÍCH. TRẢ VỀ CHO TÔI 1 BÀI VIẾT HOÀN CHỈNH ĐỂ TÔI SAO CHÉP.
+    def scroll_and_extract(self, output_path):
+        print("Starting scroll and extract process...")
+        scroll_pause_time = 5
+        last_height = self.driver.execute_script("return document.body.scrollHeight")
+        no_new_content_count = 0
+        max_no_new_content = 3
+        
+        # Load existing IDs at start
+        self.processed_ids = self.load_processed_ids(output_path)
+        print(f"Loaded {len(self.processed_ids)} previously processed ads")
+
+        target_date = None
+        if self.current_keyword in self.tracking_data:
+            first_runtime = datetime.strptime(self.tracking_data[self.current_keyword]['first_runtime'], "%Y-%m-%d")
+            target_date = first_runtime - timedelta(days=60)
+            print(f"Target date set to: {target_date}")
+        
+        # Theo dõi phần tử cuối cùng đã xử lý
+        last_processed_element = None
+        
+        while True:
+            try:
+                print("Waiting for ad elements to load...")
+                time.sleep(5)
+                
+                # Tìm tất cả các thẻ div chứa quảng cáo
+                ad_elements = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.xh8yej3"))
+                )
+                
+                # Xác định vị trí bắt đầu quét
+                start_index = 0
+                if last_processed_element:
+                    try:
+                        start_index = ad_elements.index(last_processed_element) + 1
+                    except ValueError:
+                        start_index = 0
+                
+                new_ads_processed = 0
+                
+                # Chỉ xử lý các phần tử mới
+                for ad_element in ad_elements[start_index:]:
+                    try:
+                        library_id = None
+                        try:
+                            library_id_element = ad_element.find_element(
+                                By.XPATH, ".//span[contains(text(),'Library ID:')]"
+                            )
+                            library_id = library_id_element.text.replace("Library ID: ", "")
+                        except:
+                            continue
+                        
+                        if library_id and library_id not in self.processed_ids:
+                            print(f"Processing new ad: {library_id}")
+                            ad_data = self.extract_ad_data(ad_element, self.current_keyword)
+                            self.processed_ids.add(library_id)
+                            new_ads_processed += 1
+                            
+                            if not target_date and ad_data['runtime'] != "N/A":
+                                runtime_date = self.parse_runtime(ad_data['runtime'])
+                                if runtime_date:
+                                    self.tracking_data[self.current_keyword] = {
+                                        'first_runtime': runtime_date.strftime("%Y-%m-%d"),
+                                        'target_date': (runtime_date - timedelta(days=60)).strftime("%Y-%m-%d")
+                                    }
+                                    self.save_tracking_data()
+                                    target_date = runtime_date - timedelta(days=60)
+                                    print(f"Updated target date to: {target_date}")
+                            
+                            if target_date and not self.should_continue_scrolling(ad_data['runtime'], target_date):
+                                print(f"Reached target date for keyword '{self.current_keyword}'")
+                                self.flush_buffer_to_excel(output_path)
+                                return
+                            
+                            self.temp_data_buffer.append(ad_data)
+                            if len(self.temp_data_buffer) >= self.buffer_size:
+                                self.flush_buffer_to_excel(output_path)
+                            
+                            # Cập nhật phần tử cuối cùng đã xử lý
+                            last_processed_element = ad_element
+                    
+                    except Exception as e:
+                        print(f"Error processing ad element: {e}")
+                        continue
+                
+                if new_ads_processed > 0:
+                    print(f"Successfully processed {new_ads_processed} new ads")
+                
+                print("Scrolling to bottom of page...")
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                print(f"Waiting for {scroll_pause_time} seconds...")
+                time.sleep(scroll_pause_time)
+                print("Adding random delay...")
+                time.sleep(random.uniform(0.5, 1.5))
+                
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                
+                if new_ads_processed == 0:
+                    no_new_content_count += 1
+                    print(f"No new content found. Count: {no_new_content_count}")
+                else:
+                    no_new_content_count = 0
+                
+                if new_height == last_height or no_new_content_count >= max_no_new_content:
+                    print("Checking if reached end of content...")
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(scroll_pause_time)
+                    
+                    newest_height = self.driver.execute_script("return document.body.scrollHeight")
+                    if newest_height == new_height:
+                        print("Reached end of page or no new content")
+                        self.flush_buffer_to_excel(output_path)
+                        break
+                
+                last_height = new_height
+                
+            except Exception as e:
+                print(f"Error during scrolling: {e}")
+                print("Waiting 5 seconds before retrying...")
+                time.sleep(5)
+                continue
+
+    def process_keyword(self, keyword, output_path):
+        try:
+            print(f"\nProcessing keyword: {keyword}")
+            self.current_keyword = keyword
+            
+            # Check if keyword is already completed
+            if keyword in self.tracking_data and 'completed' in self.tracking_data[keyword]:
+                print(f"Keyword '{keyword}' already completed. Skipping...")
+                return
+                
+            encoded_keyword = quote(keyword)
+            url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&content_languages[0]=en&country=US&is_targeted_country=false&media_type=video&q={encoded_keyword}&search_type=keyword_unordered"
+            
+            print(f"Navigating to URL: {url}")
+            self.driver.get(url)
+            print("Waiting 5 seconds for page load...")
+            time.sleep(5)
+            
+            self.scroll_and_extract(output_path)
+            
+            # Mark keyword as completed
+            if keyword not in self.tracking_data:
+                self.tracking_data[keyword] = {}
+            self.tracking_data[keyword]['completed'] = True
+            self.save_tracking_data()
+            
+            print(f"Completed processing keyword '{keyword}'")
+            
+        except Exception as e:
+            print(f"Error processing keyword '{keyword}': {e}")
+
+    def clear_browser_data(self):
+        """Clear all browser data including cookies, cache, and history."""
+        print("Clearing browser data...")
+        try:
+            # Đóng tất cả tab không cần thiết trước
+            original_window = self.driver.current_window_handle
+            for handle in self.driver.window_handles:
+                if handle != original_window:
+                    self.driver.switch_to.window(handle)
+                    self.driver.close()
+            self.driver.switch_to.window(original_window)
+
+            # Xóa bộ nhớ cache của trình duyệt
+            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
+            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
+            
+            # Xóa dữ liệu storage và force garbage collection
+            self.driver.execute_script("""
+                window.localStorage.clear();
+                window.sessionStorage.clear();
+                var cookies = document.cookie.split(';');
+                for (var i = 0; i < cookies.length; i++) {
+                    var cookie = cookies[i];
+                    var eqPos = cookie.indexOf('=');
+                    var name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+                    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                }
+                
+                // Force garbage collection nếu có thể
+                if (window.performance && window.performance.memory) {
+                    try {
+                        window.performance.memory.gc && window.performance.memory.gc();
+                    } catch(e) {
+                        // Ignore if gc is not available
+                    }
+                }
+            """)
+            
+            # Xóa cookies
+            self.driver.delete_all_cookies()
+            
+            # Thiết lập giới hạn bộ nhớ cho page
+            self.driver.execute_cdp_cmd('Network.enable', {})
+            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            })
+            
+            # Thực hiện thêm các bước để giảm memory usage
+            self.driver.execute_script("""
+                // Xóa các biến không sử dụng
+                for (var prop in window) {
+                    if (window.hasOwnProperty(prop) && prop !== 'performance') {
+                        try {
+                            delete window[prop];
+                        } catch(e) {}
+                    }
+                }
+                // Clear console
+                console.clear();
+            """)
+            
+            # Refresh trang
+            self.driver.refresh()
+            
+            print("Browser data cleared successfully")
+            
+        except Exception as e:
+            print(f"Error clearing browser data: {e}")
+            # Tiếp tục thực hiện mặc dù có lỗi
+        
+        # Verify cookies
+        remaining_cookies = self.driver.get_cookies()
+        if remaining_cookies:
+            print(f"Warning: {len(remaining_cookies)} cookies still remain")
+        else:
+            print("All cookies have been cleared")
+
+        # Kiểm tra memory usage
+        memory_info = self.driver.execute_script("""
+            return window.performance.memory ? {
+                totalJSHeapSize: window.performance.memory.totalJSHeapSize,
+                usedJSHeapSize: window.performance.memory.usedJSHeapSize,
+                jsHeapSizeLimit: window.performance.memory.jsHeapSizeLimit
+            } : null;
+        """)
+        
+        if memory_info:
+            print(f"Memory usage: {memory_info}")
+
+        # Thực hiện force garbage collection thông qua CDP
+        try:
+            self.driver.execute_cdp_cmd('HeapProfiler.collectGarbage', {})
+        except:
+            pass
+        
+    def process_keyword_files(self):
+        print("Starting to process keyword files...")
+        try:
+            ads_library_dir = os.path.join("Downloads", "Ads Library Analysis")
+            txt_files = [f for f in os.listdir(ads_library_dir) if f.endswith('.txt')]
+            
+            print(f"Found {len(txt_files)} text files to process")
+            for txt_file in txt_files:
+                txt_path = os.path.join(ads_library_dir, txt_file)
+                output_path = os.path.join(ads_library_dir, f"{os.path.splitext(txt_file)[0]}_results.xlsx")
+                
+                print(f"\nProcessing file: {txt_file}")
+                with open(txt_path, 'r', encoding='utf-8') as f:
+                    keywords = [line.strip() for line in f if line.strip()]
+                
+                print(f"Found {len(keywords)} keywords in {txt_file}")
+                for keyword in keywords:
+                    print(f"\nProcessing keyword: {keyword}")
+                    self.process_keyword(keyword, output_path)
+                    
+                    # Clear browser data after processing each keyword
+                    print("Clearing browser data before next keyword...")
+                    self.clear_browser_data()
+                    
+                    print("Waiting 2 seconds before next keyword...")
+                    time.sleep(2)
+                
+        except Exception as e:
+            print(f"Error processing keyword files: {e}")
+
+    def close(self):
+        print("Closing browser...")
+        if self.driver:
+            self.driver.quit()
+        print("Browser closed successfully")
+
+def main():
+    print("Starting Facebook Ads Library Scraper...")
+    os.makedirs(os.path.join("Downloads", "Ads Library Analysis"), exist_ok=True)
+    print("Created necessary directories")
+
+    scraper = FacebookAdsLibrary()
+    print("Initialized scraper")
+
+    if not scraper.setup_driver():
+        print("Failed to setup driver. Exiting...")
+        return
+
+    try:
+        scraper.process_keyword_files()
+    finally:
+        scraper.close()
+
+if __name__ == "__main__":
+    main()
