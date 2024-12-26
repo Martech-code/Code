@@ -475,6 +475,7 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
 def worker_process(chrome_instance: ChromeInstance, keywords: List[str], processed_items: set, processed_groups: set, lock, output_dir):
     try:
         driver = chrome_instance.create_driver()
+        chrome_instance.update_activity()  # Cập nhật khi khởi tạo
         output_file = os.path.join(output_dir, 'groups_data.csv')
         retry_count = 0
 
@@ -521,6 +522,7 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
 
         while True:
             print_with_activity_update(chrome_instance, "Đang xử lý...")
+            chrome_instance.update_activity()  # Cập nhật đầu mỗi vòng lặp
             
             if chrome_instance.check_checkpoint():
                 chrome_instance.is_checkpoint = True
@@ -583,12 +585,14 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                     )
                     
                     if process_single_group(chrome_instance, group_url, search_keywords, output_file, lock):
+                        chrome_instance.update_activity()
                         with lock:
                             processed_groups.add(group_url)
                             chrome_instance.processed_groups.add(group_url)
                         processed_urls += 1
                     else:
                         failed_urls += 1
+                        chrome_instance.update_activity()
 
                     time.sleep(random.uniform(MIN_DELAY_BETWEEN_REQUESTS, MAX_DELAY_BETWEEN_REQUESTS))
 
@@ -679,8 +683,8 @@ def check_workers_status(chrome_instances):
     stopped_workers = 0
     
     for instance in chrome_instances:
-        # Kiểm tra xem worker có hoạt động trong 1 phút qua không
-        if (current_time - instance.last_activity) <= timedelta(minutes=1):
+        # Kiểm tra xem worker có hoạt động trong 2 phút qua không
+        if (current_time - instance.last_activity) <= timedelta(minutes=2):
             active_workers += 1
         else:
             stopped_workers += 1
@@ -731,10 +735,10 @@ def main():
     
     # Thread riêng để theo dõi và báo cáo trạng thái worker
     def monitor_workers():
-        # Đợi 1 phút đầu tiên
-        time.sleep(60)
+        # Đợi 2 phút đầu tiên
+        time.sleep(120)
         
-        # Gửi thông báo đầu tiên sau 1 phút
+        # Gửi thông báo đầu tiên sau 2 phút
         active_workers, stopped_workers = check_workers_status(chrome_instances)
         message = (
             f"May 23: Hiện tại đang có {active_workers} worker làm việc, "
