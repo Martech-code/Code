@@ -13,6 +13,7 @@ import pandas as pd
 import os
 import random
 import json
+import requests
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
@@ -493,6 +494,9 @@ class FacebookAdsLibrary:
             self.tracking_data[keyword]['completed'] = True
             self.save_tracking_data()
             
+            # Send completion report to Telegram
+            self.send_keyword_completion_report(output_path)
+            
             print(f"Completed processing keyword '{keyword}'")
             
         except Exception as e:
@@ -523,6 +527,66 @@ class FacebookAdsLibrary:
                 
         except Exception as e:
             print(f"Error processing keyword files: {e}")
+            
+    def send_telegram_message(self, message):
+        """Send message to Telegram channel."""
+        bot_token = "7584627793:AAHPB4zaMSTYgu2P6N9RMlplr0KcFMP1FQQ"
+        chat_id = "-1002371940283"
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        
+        try:
+            response = requests.post(url, json={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "HTML"
+            })
+            if response.status_code != 200:
+                print(f"Failed to send Telegram message: {response.text}")
+        except Exception as e:
+            print(f"Error sending Telegram message: {e}")
+
+    def get_excel_row_count(self, output_path):
+        """Get the number of rows in Excel file for current keyword."""
+        try:
+            if os.path.exists(output_path):
+                df = pd.read_excel(output_path)
+                return len(df[df['keyword'] == self.current_keyword])
+            return 0
+        except Exception as e:
+            print(f"Error counting Excel rows: {e}")
+            return 0
+
+    def send_keyword_completion_report(self, output_path):
+        """Send completion report for current keyword to Telegram."""
+        try:
+            if self.current_keyword in self.tracking_data:
+                data = self.tracking_data[self.current_keyword]
+                first_runtime = datetime.strptime(data['first_runtime'], "%Y-%m-%d")
+                
+                # Get the last runtime from Excel
+                df = pd.read_excel(output_path)
+                keyword_data = df[df['keyword'] == self.current_keyword]
+                if not keyword_data.empty:
+                    last_runtime_str = keyword_data['runtime'].iloc[-1]
+                    last_runtime = self.parse_runtime(last_runtime_str)
+                    last_runtime_str = last_runtime.strftime("%Y-%m-%d") if last_runtime else "Unknown"
+                else:
+                    last_runtime_str = "Unknown"
+                
+                row_count = self.get_excel_row_count(output_path)
+                
+                message = (
+                    f"📊 Keyword Report: <b>{self.current_keyword}</b>\n\n"
+                    f"📅 First data: {data['first_runtime']}\n"
+                    f"🎯 Target date: {data['target_date']}\n"
+                    f"🛑 Last data: {last_runtime_str}\n"
+                    f"📝 Total ads found: {row_count}"
+                )
+                
+                self.send_telegram_message(message)
+                
+        except Exception as e:
+            print(f"Error sending completion report: {e}")
 
     def close(self):
         print("Closing browser...")
