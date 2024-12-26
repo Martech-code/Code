@@ -4,6 +4,7 @@ import random
 import json
 import csv
 import re
+import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -14,6 +15,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException, NoS
 from collections import defaultdict, deque
 from typing import Dict, List
 from selenium.webdriver.common.action_chains import ActionChains
+from datetime import datetime, timedelta
 import os
 import threading
 import math
@@ -643,6 +645,34 @@ def save_progress(processed_items, processed_groups, output_dir):
             'processed_items': list(processed_items),
             'processed_groups': list(processed_groups)
         }, f)
+        
+def send_telegram_message(message):
+    bot_token = "7584627793:AAHPB4zaMSTYgu2P6N9RMlplr0KcFMP1FQQ"
+    chat_id = "-1002371940283"
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    
+    try:
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Lỗi gửi tin nhắn Telegram: {str(e)}")
+
+def check_workers_status(chrome_instances):
+    active_workers = 0
+    stopped_workers = 0
+    
+    for instance in chrome_instances:
+        if instance.driver and not (instance.is_checkpoint or instance.is_blocked):
+            active_workers += 1
+        else:
+            stopped_workers += 1
+            
+    return active_workers, stopped_workers
 
 def main():
     input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
@@ -677,6 +707,28 @@ def main():
     ]
 
     lock = threading.Lock()
+    
+    # Khởi tạo thời gian cho việc gửi báo cáo
+    last_report_time = datetime.now()
+    
+    # Thread riêng để theo dõi và báo cáo trạng thái worker
+    def monitor_workers():
+        nonlocal last_report_time
+        while True:
+            current_time = datetime.now()
+            if current_time - last_report_time >= timedelta(minutes=30):
+                active_workers, stopped_workers = check_workers_status(chrome_instances)
+                message = (
+                    f"Tìm Group Công Khai: Hiện tại đang có {active_workers} worker làm việc, "
+                    f"{stopped_workers} worker bị dừng"
+                )
+                send_telegram_message(message)
+                last_report_time = current_time
+            time.sleep(60)  # Kiểm tra mỗi phút
+
+    # Khởi động thread monitor
+    monitor_thread = threading.Thread(target=monitor_workers, daemon=True)
+    monitor_thread.start()
 
     threads = []
     for chrome_instance in chrome_instances:
