@@ -14,7 +14,9 @@ from selenium.common.exceptions import TimeoutException, WebDriverException, NoS
 from collections import defaultdict, deque
 from typing import Dict, List
 from selenium.webdriver.common.action_chains import ActionChains
+from datetime import datetime, timedelta
 import os
+import requests
 import threading
 import math
 
@@ -27,6 +29,10 @@ PAGE_LOAD_TIMEOUT = 10
 TAB_SWITCH_DELAY = 0.2
 MAX_TABS = 5
 SCROLL_PAUSE_TIME = 2
+TELEGRAM_TOKEN = "7584627793:AAHPB4zaMSTYgu2P6N9RMlplr0KcFMP1FQQ"
+TELEGRAM_CHAT_ID = "-1002371940283"
+WORKER_CHECK_INTERVAL = 30 * 60  # 30 phút
+WORKER_INACTIVE_THRESHOLD = 10 * 60  # 10 phút
 
 def calculate_std_dev(values):
     n = len(values)
@@ -644,11 +650,88 @@ def save_progress(processed_items, processed_groups, output_dir):
             'processed_groups': list(processed_groups)
         }, f)
 
+class WorkerMonitor:
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
+        self.last_activity = {}
+        self.lock = threading.Lock()
+
+    def send_telegram_message(self, message):
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "parse_mode": "HTML"
+            }
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+        except Exception as e:
+            print(f"Lỗi gửi tin nhắn Telegram: {str(e)}")
+
+    def check_worker_activity(self, worker_id):
+        collected_file = os.path.join(self.output_dir, f'collected_urls_worker_{worker_id}.json')
+        failed_file = os.path.join(self.output_dir, f'failed_urls_worker_{worker_id}.json')
+        
+        current_time = datetime.now()
+        latest_activity_time = None
+
+        try:
+            if os.path.exists(collected_file):
+                collected_time = datetime.fromtimestamp(os.path.getmtime(collected_file))
+                latest_activity_time = collected_time
+
+            if os.path.exists(failed_file):
+                failed_time = datetime.fromtimestamp(os.path.getmtime(failed_file))
+                if not latest_activity_time or failed_time > latest_activity_time:
+                    latest_activity_time = failed_time
+
+            if latest_activity_time:
+                time_diff = (current_time - latest_activity_time).total_seconds()
+                if time_diff > WORKER_INACTIVE_THRESHOLD:
+                    return False
+                return True
+            return False
+        except Exception as e:
+            print(f"Lỗi kiểm tra hoạt động worker {worker_id}: {str(e)}")
+            return False
+
+    def monitor_workers(self, num_workers):
+        while True:
+            active_workers = 0
+            inactive_workers = 0
+
+            for worker_id in range(1, num_workers + 1):
+                if self.check_worker_activity(worker_id):
+                    active_workers += 1
+                else:
+                    inactive_workers += 1
+
+            message = f"May 21: Hiện tại đang có {active_workers} worker làm việc, {inactive_workers} worker bị dừng"
+            self.send_telegram_message(message)
+
+            time.sleep(WORKER_CHECK_INTERVAL)
+
 def main():
-    input_file = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\output'
+    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
+    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Khởi tạo monitor
+    worker_monitor = WorkerMonitor(output_dir)
+    
+    # Tạo và start thread monitor
+    num_workers = 6  # Số lượng worker
+    monitor_thread = threading.Thread(
+        target=worker_monitor.monitor_workers,
+        args=(num_workers,),
+        daemon=True
+    )
+    monitor_thread.start()
+
+    # Gửi thông báo đầu tiên sau 1 phút
+    threading.Timer(60, lambda: worker_monitor.monitor_workers(num_workers)).start()
 
     keywords = load_keywords(input_file)
     processed_items, processed_groups = load_progress(output_dir)
@@ -669,7 +752,11 @@ def main():
         ChromeInstance(debug_port=9224, worker_id=3),
         ChromeInstance(debug_port=9225, worker_id=4),
         ChromeInstance(debug_port=9226, worker_id=5),
-        ChromeInstance(debug_port=9227, worker_id=6)
+        ChromeInstance(debug_port=9227, worker_id=6),
+        ChromeInstance(debug_port=9228, worker_id=7),
+        ChromeInstance(debug_port=9229, worker_id=8),
+        ChromeInstance(debug_port=9230, worker_id=9),
+        ChromeInstance(debug_port=9231, worker_id=10)
     ]
 
     lock = threading.Lock()
