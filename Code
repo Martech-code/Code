@@ -14,6 +14,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException, NoS
 from collections import defaultdict, deque
 from typing import Dict, List
 from selenium.webdriver.common.action_chains import ActionChains
+import logging
 import os
 import threading
 import math
@@ -35,6 +36,47 @@ def calculate_std_dev(values):
     mean = sum(values) / n
     squared_diff_sum = sum((x - mean) ** 2 for x in values)
     return math.sqrt(squared_diff_sum / (n - 1))
+    
+class Logger:
+    def __init__(self, output_dir, worker_id=None):
+        self.output_dir = output_dir
+        self.worker_id = worker_id
+        self.log_file = os.path.join(output_dir, f'log_worker_{worker_id}.json' if worker_id else 'log_main.json')
+        self.lock = threading.Lock()
+        self._initialize_log_file()
+
+    def _initialize_log_file(self):
+        if not os.path.exists(self.log_file):
+            with open(self.log_file, 'w', encoding='utf-8') as f:
+                json.dump([], f)
+
+    def log(self, message, level="INFO"):
+        log_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'level': level,
+            'worker_id': self.worker_id,
+            'message': message
+        }
+        
+        # Print to console
+        print(f"[Worker {self.worker_id}] {message}" if self.worker_id else message)
+        
+        # Write to JSON file
+        with self.lock:
+            try:
+                with open(self.log_file, 'r+', encoding='utf-8') as f:
+                    try:
+                        logs = json.load(f)
+                    except json.JSONDecodeError:
+                        logs = []
+                    
+                    logs.append(log_entry)
+                    
+                    f.seek(0)
+                    json.dump(logs, f, ensure_ascii=False, indent=2)
+                    f.truncate()
+            except Exception as e:
+                print(f"Error writing to log file: {str(e)}")
 
 class ChromeInstance:
     def __init__(self, debug_port, worker_id):
@@ -47,6 +89,10 @@ class ChromeInstance:
         self.processed_groups = set()
         self.collected_urls = []
         self.failed_urls = []
+        self.logger = None  # Will be initialized in setup_logger
+        
+    def setup_logger(self, output_dir):
+        self.logger = Logger(output_dir, self.worker_id)
 
     def save_progress(self, keyword, urls, current_index, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
@@ -60,7 +106,7 @@ class ChromeInstance:
             with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(progress_data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[Worker {self.worker_id}] Lỗi lưu tiến độ: {str(e)}")
+            chrome_instance.logger.log(f"Lỗi lưu tiến độ: {str(e)}")
 
     def load_progress(self, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
@@ -69,7 +115,7 @@ class ChromeInstance:
                 with open(progress_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
         except Exception as e:
-            print(f"[Worker {self.worker_id}] Lỗi đọc tiến độ: {str(e)}")
+            chrome_instance.logger.log(f"Lỗi đọc tiến độ: {str(e)}")
         return None
 
     def clear_progress(self, output_dir):
@@ -78,7 +124,7 @@ class ChromeInstance:
             if os.path.exists(progress_file):
                 os.remove(progress_file)
         except Exception as e:
-            print(f"[Worker {self.worker_id}] Lỗi xóa file tiến độ: {str(e)}")
+            chrome_instance.logger.log(f"Lỗi xóa file tiến độ: {str(e)}")
 
     def setup_chrome_driver(self):
         chrome_options = Options()
@@ -148,15 +194,15 @@ class ChromeInstance:
                     try:
                         actions = ActionChains(self.driver)
                         actions.double_click(skip_button[0]).perform()
-                        print(f"[Worker {self.worker_id}] Đã click nút Bỏ qua trên trang Checkpoint")
+                        chrome_instance.logger.log(f"Đã click nút Bỏ qua trên trang Checkpoint")
                         time.sleep(1)
                         return True
                     except Exception as e:
-                        print(f"[Worker {self.worker_id}] Lỗi khi click nút Bỏ qua: {str(e)}")
+                        chrome_instance.logger.log(f"Lỗi khi click nút Bỏ qua: {str(e)}")
                         return False
             return False
         except Exception as e:
-            print(f"[Worker {self.worker_id}] Lỗi khi kiểm tra trang suspicious: {str(e)}")
+            chrome_instance.logger.log(f"Lỗi khi kiểm tra trang suspicious: {str(e)}")
             return False
 
     # Thêm hàm mới để theo dõi URL
@@ -167,10 +213,10 @@ class ChromeInstance:
             if "facebook.com/checkpoint/601051028565049" in current_url.lower():
                 self.check_suspicious()
         except Exception as e:
-            print(f"[Worker {self.worker_id}] Lỗi khi theo dõi URL: {str(e)}")
+            chrome_instance.logger.log(f"Lỗi khi theo dõi URL: {str(e)}")
 
     def scroll_and_collect_groups(self):
-        print(f"[Worker {self.worker_id}] Bắt đầu scroll và thu thập URLs...")
+        chrome_instance.logger.log(f"Bắt đầu scroll và thu thập URLs...")
         group_links = []  # Đổi từ set sang list để duy trì thứ tự
         group_links_set = set()  # Dùng set để kiểm tra trùng lặp
         no_new_content_count = 0
@@ -206,22 +252,22 @@ class ChromeInstance:
                     continue
             
             current_unique_count = len(group_links)
-            print(f"[Worker {self.worker_id}] Đã tìm thấy {new_urls_added} nhóm mới (Tổng: {current_unique_count} nhóm độc nhất)")
+            chrome_instance.logger.log(f"Đã tìm thấy {new_urls_added} nhóm mới (Tổng: {current_unique_count} nhóm độc nhất)")
             
             if current_unique_count == previous_unique_count:
                 no_new_content_count += 1
-                print(f"[Worker {self.worker_id}] Không tìm thấy nhóm mới... ({no_new_content_count}/8)")
+                chrome_instance.logger.log(f"Không tìm thấy nhóm mới... ({no_new_content_count}/8)")
                 
                 # Kiểm tra popup khi no_new_content_count = 6
                 if no_new_content_count == 6:
-                    print(f"[Worker {self.worker_id}] Kiểm tra và xử lý popup tại lần thứ 6...")
+                    chrome_instance.logger.log(f"Kiểm tra và xử lý popup tại lần thứ 6...")
                     if self.close_block_popup():
-                        print(f"[Worker {self.worker_id}] Đã đóng popup block, tiếp tục thu thập...")
+                        chrome_instance.logger.log(f"Đã đóng popup block, tiếp tục thu thập...")
                         time.sleep(1)
                         continue  # Bỏ qua phần còn lại và tiếp tục vòng lặp
                 
                 if no_new_content_count >= 8:
-                    print(f"[Worker {self.worker_id}] Hoàn tất thu thập URLs sau 8 lần không có nhóm mới")
+                    chrome_instance.logger.log(f"Hoàn tất thu thập URLs sau 8 lần không có nhóm mới")
                     break
             else:
                 no_new_content_count = 0
@@ -234,10 +280,10 @@ class ChromeInstance:
             elif abs(actual_height - last_height) < 100:
                 time.sleep(SCROLL_PAUSE_TIME * 2)
                 if abs(actual_height - self.driver.execute_script("return document.documentElement.scrollHeight")) < 100:
-                    print(f"[Worker {self.worker_id}] Đã đến cuối trang")
+                    chrome_instance.logger.log(f"Đã đến cuối trang")
                     break
 
-        print(f"[Worker {self.worker_id}] Tổng cộng đã thu thập được {len(group_links)} URLs độc nhất")
+        chrome_instance.logger.log(f"Tổng cộng đã thu thập được {len(group_links)} URLs độc nhất")
         return group_links  # Trả về list thay vì set
 
 def save_group_urls(urls, keyword, output_dir, worker_id):
@@ -274,9 +320,9 @@ def save_group_urls(urls, keyword, output_dir, worker_id):
             
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(existing_data, f, ensure_ascii=False, indent=2)
-            print(f"[Worker {worker_id}] Đã lưu {len(new_urls)} URLs mới vào file")
+            chrome_instance.logger.log(f"Đã lưu {len(new_urls)} URLs mới vào file")
         else:
-            print(f"[Worker {worker_id}] Không có URLs mới để lưu")
+            chrome_instance.logger.log(f"Không có URLs mới để lưu")
             
     except Exception as e:
         print(f"Error saving URLs to JSON: {str(e)}")
@@ -290,7 +336,7 @@ def save_failed_urls(failed_urls, output_dir, worker_id):
                 'total_failed': len(failed_urls),
                 'timestamp': datetime.now().isoformat()
             }, f, ensure_ascii=False, indent=2)
-        print(f"[Worker {worker_id}] Đã lưu {len(failed_urls)} URLs thất bại vào file")
+        chrome_instance.logger.log(f"Đã lưu {len(failed_urls)} URLs thất bại vào file")
     except Exception as e:
         print(f"Error saving failed URLs: {str(e)}")
 
@@ -467,6 +513,9 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
 
 def worker_process(chrome_instance: ChromeInstance, keywords: List[str], processed_items: set, processed_groups: set, lock, output_dir):
     try:
+        # Initialize logger
+        chrome_instance.setup_logger(output_dir)
+        
         driver = chrome_instance.create_driver()
         output_file = os.path.join(output_dir, 'groups_data.csv')
         retry_count = 0
@@ -474,9 +523,9 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
         # Kiểm tra và load tiến độ trước đó
         progress_data = chrome_instance.load_progress(output_dir)
         if progress_data:
-            print(f"[Worker {chrome_instance.worker_id}] Tìm thấy tiến độ trước đó:")
-            print(f"- Keyword: {progress_data['keyword']}")
-            print(f"- Số URL còn lại: {len(progress_data['urls']) - progress_data['current_index']}")
+            chrome_instance.logger.log("Tìm thấy tiến độ trước đó:")
+            chrome_instance.logger.log(f"- Keyword: {progress_data['keyword']}")
+            chrome_instance.logger.log(f"- Số URL còn lại: {len(progress_data['urls']) - progress_data['current_index']}")
             
             # Tiếp tục xử lý các URL còn lại từ lần trước
             total_remaining = len(progress_data['urls']) - progress_data['current_index']
@@ -645,10 +694,13 @@ def save_progress(processed_items, processed_groups, output_dir):
         }, f)
 
 def main():
-    input_file = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\output'
+    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
+    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Initialize main logger
+    main_logger = Logger(output_dir)    
 
     keywords = load_keywords(input_file)
     processed_items, processed_groups = load_progress(output_dir)
@@ -658,10 +710,10 @@ def main():
     total_combinations = get_combinations_count(total_keywords)
     used_combinations = len(processed_items)
 
-    print(f"Tổng số keywords gốc: {total_keywords}")
-    print(f"Tổng số tổ hợp có thể: {total_combinations}")
-    print(f"Số tổ hợp đã sử dụng: {used_combinations}")
-    print(f"Còn lại: {total_combinations - used_combinations} tổ hợp chưa sử dụng")
+    main_logger.log(f"Tổng số keywords gốc: {total_keywords}")
+    main_logger.log(f"Tổng số tổ hợp có thể: {total_combinations}")
+    main_logger.log(f"Số tổ hợp đã sử dụng: {used_combinations}")
+    main_logger.log(f"Còn lại: {total_combinations - used_combinations} tổ hợp chưa sử dụng")
 
     chrome_instances = [
         ChromeInstance(debug_port=9222, worker_id=1),
@@ -669,8 +721,13 @@ def main():
         ChromeInstance(debug_port=9224, worker_id=3),
         ChromeInstance(debug_port=9225, worker_id=4),
         ChromeInstance(debug_port=9226, worker_id=5),
-        ChromeInstance(debug_port=9227, worker_id=6)
+        ChromeInstance(debug_port=9227, worker_id=6),
+        ChromeInstance(debug_port=9228, worker_id=7),
+        ChromeInstance(debug_port=9229, worker_id=8),
+        ChromeInstance(debug_port=9230, worker_id=9),
+        ChromeInstance(debug_port=9231, worker_id=10)
     ]
+
 
     lock = threading.Lock()
 
