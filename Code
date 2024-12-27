@@ -19,7 +19,7 @@ import os
 import requests
 import threading
 import math
-
+import sys
 
 # Configuration parameters
 MIN_DELAY_BETWEEN_REQUESTS = 0.5
@@ -712,11 +712,47 @@ class WorkerMonitor:
 
             time.sleep(WORKER_CHECK_INTERVAL)
 
+class OutputLogger:
+    def __init__(self, output_dir):
+        self.terminal = sys.stdout
+        self.log_file = os.path.join(output_dir, 'console_log.json')
+        self.log_data = []
+        
+        # Load existing logs if any
+        if os.path.exists(self.log_file):
+            try:
+                with open(self.log_file, 'r', encoding='utf-8') as f:
+                    self.log_data = json.load(f)
+            except:
+                self.log_data = []
+
+    def write(self, message):
+        self.terminal.write(message)
+        if message.strip():  # Only log non-empty messages
+            log_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'message': message.strip()
+            }
+            self.log_data.append(log_entry)
+            
+            # Save to file
+            try:
+                with open(self.log_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.log_data, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                self.terminal.write(f"\nError saving log: {str(e)}\n")
+
+    def flush(self):
+        self.terminal.flush()
+
 def main():
     input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
     output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Add this line to capture all console output
+    sys.stdout = OutputLogger(output_dir)
     
     # Khởi tạo monitor
     worker_monitor = WorkerMonitor(output_dir)
