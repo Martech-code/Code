@@ -49,6 +49,18 @@ class ChromeInstance:
         self.processed_groups = set()
         self.collected_urls = []
         self.failed_urls = []
+        self.processed_urls = set()  # Thêm tracking URLs đã xử lý
+        self.skipped_urls = []      # Thêm tracking URLs bị bỏ qua
+        
+    def track_processed_url(self, url):
+        self.processed_urls.add(url)
+        
+    def track_skipped_url(self, url, reason):
+        self.skipped_urls.append({
+            'url': url,
+            'timestamp': datetime.now().isoformat(),
+            'reason': reason
+        })
 
     def save_progress(self, keyword, urls, current_index, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
@@ -480,35 +492,63 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
             print(f"- Keyword: {progress_data['keyword']}")
             print(f"- Số URL còn lại: {len(progress_data['urls']) - progress_data['current_index']}")
             
-            # Tiếp tục xử lý các URL còn lại từ lần trước
-            total_remaining = len(progress_data['urls']) - progress_data['current_index']
-            processed_urls = 0
-            failed_urls = 0
+            # Thêm tracking URLs đã xử lý
+            processed_urls_tracking = set()
+            skipped_urls = []
             
-            for idx, group_url in enumerate(progress_data['urls'][progress_data['current_index']:], 1):
-                if group_url in processed_groups:
-                    processed_urls += 1
+            remaining_urls = progress_data['urls'][progress_data['current_index']:]
+            total_remaining = len(remaining_urls)
+            
+            for idx, group_url in enumerate(remaining_urls, 1):
+                current_index = progress_data['current_index'] + idx - 1
+                
+                # Kiểm tra URL đã xử lý chưa
+                if group_url in processed_groups or group_url in processed_urls_tracking:
+                    print(f"[Worker {chrome_instance.worker_id}] URL đã xử lý trước đó: {group_url}")
                     continue
 
-                print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm còn lại {idx}/{total_remaining}")
+                print(f"[Worker {chrome_instance.worker_id}] Đang xử lý nhóm {idx}/{total_remaining} (Index: {current_index})")
                 
-                if process_single_group(chrome_instance, group_url, progress_data['keyword'], output_file, lock):
-                    with lock:
-                        processed_groups.add(group_url)
-                        chrome_instance.processed_groups.add(group_url)
-                    processed_urls += 1
-                else:
-                    failed_urls += 1
+                try:
+                    if process_single_group(chrome_instance, group_url, progress_data['keyword'], output_file, lock):
+                        with lock:
+                            processed_groups.add(group_url)
+                            chrome_instance.processed_groups.add(group_url)
+                            processed_urls_tracking.add(group_url)
+                    else:
+                        skipped_urls.append({
+                            'url': group_url,
+                            'index': current_index,
+                            'reason': 'Processing failed'
+                        })
+                except Exception as e:
+                    print(f"[Worker {chrome_instance.worker_id}] Lỗi xử lý URL {group_url}: {str(e)}")
+                    skipped_urls.append({
+                        'url': group_url,
+                        'index': current_index,
+                        'reason': str(e)
+                    })
 
                 # Lưu tiến độ sau mỗi URL
                 chrome_instance.save_progress(
                     progress_data['keyword'],
                     progress_data['urls'],
-                    progress_data['current_index'] + idx,
+                    current_index + 1,  # Cập nhật index chính xác
                     output_dir
                 )
 
                 time.sleep(random.uniform(MIN_DELAY_BETWEEN_REQUESTS, MAX_DELAY_BETWEEN_REQUESTS))
+
+            # Lưu thông tin URLs bị bỏ qua
+            if skipped_urls:
+                skipped_file = os.path.join(output_dir, f'skipped_urls_worker_{chrome_instance.worker_id}.json')
+                with open(skipped_file, 'w', encoding='utf-8') as f:
+                    json.dump({
+                        'keyword': progress_data['keyword'],
+                        'skipped_urls': skipped_urls,
+                        'timestamp': datetime.now().isoformat()
+                    }, f, ensure_ascii=False, indent=2)
+                print(f"[Worker {chrome_instance.worker_id}] Đã lưu {len(skipped_urls)} URLs bị bỏ qua")
 
             # Xóa file tiến độ sau khi hoàn thành
             chrome_instance.clear_progress(output_dir)
