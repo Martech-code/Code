@@ -691,12 +691,16 @@ class OutputLogger:
         self.terminal = sys.stdout
         self.log_file = os.path.join(output_dir, 'console_log.json')
         self.log_data = []
+        self.MAX_LOG_ENTRIES = 1000
         
         # Load existing logs if any
         if os.path.exists(self.log_file):
             try:
                 with open(self.log_file, 'r', encoding='utf-8') as f:
                     self.log_data = json.load(f)
+                    # Ensure we only keep the latest MAX_LOG_ENTRIES
+                    if len(self.log_data) > self.MAX_LOG_ENTRIES:
+                        self.log_data = self.log_data[-self.MAX_LOG_ENTRIES:]
             except:
                 self.log_data = []
 
@@ -707,7 +711,12 @@ class OutputLogger:
                 'timestamp': datetime.now().isoformat(),
                 'message': message.strip()
             }
-            self.log_data.append(log_entry)
+            # Add new entry at the beginning of the list
+            self.log_data.insert(0, log_entry)
+            
+            # Keep only the latest MAX_LOG_ENTRIES
+            if len(self.log_data) > self.MAX_LOG_ENTRIES:
+                self.log_data = self.log_data[:self.MAX_LOG_ENTRIES]
             
             # Save to file
             try:
