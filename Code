@@ -4,7 +4,6 @@ import random
 import json
 import csv
 import re
-import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -15,7 +14,6 @@ from selenium.common.exceptions import TimeoutException, WebDriverException, NoS
 from collections import defaultdict, deque
 from typing import Dict, List
 from selenium.webdriver.common.action_chains import ActionChains
-from datetime import datetime, timedelta
 import os
 import threading
 import math
@@ -42,7 +40,6 @@ class ChromeInstance:
     def __init__(self, debug_port, worker_id):
         self.debug_port = debug_port
         self.worker_id = worker_id
-        self.last_activity = datetime.now()  # Thêm theo dõi thời gian hoạt động cuối
         self.driver = None
         self.processed_count = 0
         self.is_checkpoint = False
@@ -50,10 +47,6 @@ class ChromeInstance:
         self.processed_groups = set()
         self.collected_urls = []
         self.failed_urls = []
-        
-    def update_activity(self):
-        """Cập nhật thời gian hoạt động cuối"""
-        self.last_activity = datetime.now()
 
     def save_progress(self, keyword, urls, current_index, output_dir):
         progress_file = os.path.join(output_dir, f'progress_worker_{self.worker_id}.json')
@@ -475,7 +468,6 @@ def process_single_group(chrome_instance, group_url, search_keywords, output_fil
 def worker_process(chrome_instance: ChromeInstance, keywords: List[str], processed_items: set, processed_groups: set, lock, output_dir):
     try:
         driver = chrome_instance.create_driver()
-        chrome_instance.update_activity()  # Cập nhật khi khởi tạo
         output_file = os.path.join(output_dir, 'groups_data.csv')
         retry_count = 0
 
@@ -521,9 +513,6 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
             print(f"[Worker {chrome_instance.worker_id}] Đã hoàn thành xử lý các URL còn lại")
 
         while True:
-            print_with_activity_update(chrome_instance, "Đang xử lý...", output_dir)
-            chrome_instance.update_activity()  # Cập nhật đầu mỗi vòng lặp
-            
             if chrome_instance.check_checkpoint():
                 chrome_instance.is_checkpoint = True
                 print(f"[Worker {chrome_instance.worker_id}] Tài khoản bị checkpoint, dừng worker")
@@ -585,14 +574,12 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                     )
                     
                     if process_single_group(chrome_instance, group_url, search_keywords, output_file, lock):
-                        chrome_instance.update_activity()
                         with lock:
                             processed_groups.add(group_url)
                             chrome_instance.processed_groups.add(group_url)
                         processed_urls += 1
                     else:
                         failed_urls += 1
-                        chrome_instance.update_activity()
 
                     time.sleep(random.uniform(MIN_DELAY_BETWEEN_REQUESTS, MAX_DELAY_BETWEEN_REQUESTS))
 
@@ -618,8 +605,6 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
                     if chrome_instance.processed_count % 10 == 0:
                         save_progress(processed_items, processed_groups, output_dir)
 
-                chrome_instance.update_activity()
-
             except Exception as e:
                 print(f"[Worker {chrome_instance.worker_id}] Lỗi xử lý từ khóa {search_keywords}: {str(e)}")
                 retry_count += 1
@@ -630,7 +615,6 @@ def worker_process(chrome_instance: ChromeInstance, keywords: List[str], process
 
     except Exception as e:
         print(f"[Worker {chrome_instance.worker_id}] Lỗi: {str(e)}")
-        print_with_activity_update(chrome_instance, f"Lỗi: {str(e)}", output_dir)
     finally:
         if chrome_instance.failed_urls:
             save_failed_urls(chrome_instance.failed_urls, output_dir, chrome_instance.worker_id)
@@ -659,90 +643,10 @@ def save_progress(processed_items, processed_groups, output_dir):
             'processed_items': list(processed_items),
             'processed_groups': list(processed_groups)
         }, f)
-        
-def save_worker_status(worker_id: int, message: str, output_dir: str):
-    """Lưu trạng thái worker vào file JSON"""
-    status_file = os.path.join(output_dir, 'worker_status.json')
-    timestamp = datetime.now().isoformat()
-    
-    try:
-        # Đọc dữ liệu hiện có
-        if os.path.exists(status_file):
-            with open(status_file, 'r', encoding='utf-8') as f:
-                status_data = json.load(f)
-        else:
-            status_data = {}
-            
-        # Cập nhật trạng thái worker
-        if str(worker_id) not in status_data:
-            status_data[str(worker_id)] = []
-            
-        status_data[str(worker_id)].append({
-            'timestamp': timestamp,
-            'message': message
-        })
-        
-        # Giữ lại 100 message gần nhất cho mỗi worker
-        if len(status_data[str(worker_id)]) > 100:
-            status_data[str(worker_id)] = status_data[str(worker_id)][-100:]
-            
-        # Lưu file
-        with open(status_file, 'w', encoding='utf-8') as f:
-            json.dump(status_data, f, ensure_ascii=False, indent=2)
-            
-    except Exception as e:
-        print(f"Lỗi khi lưu trạng thái worker {worker_id}: {str(e)}")
-        
-def send_telegram_message(message):
-    bot_token = "7584627793:AAHPB4zaMSTYgu2P6N9RMlplr0KcFMP1FQQ"
-    chat_id = "-1002371940283"
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    
-    try:
-        payload = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-    except Exception as e:
-        print(f"Lỗi gửi tin nhắn Telegram: {str(e)}")
-
-def check_workers_status(output_dir: str) -> tuple:
-    """Kiểm tra trạng thái các worker từ file status"""
-    status_file = os.path.join(output_dir, 'worker_status.json')
-    current_time = datetime.now()
-    active_workers = 0
-    stopped_workers = 0
-    
-    try:
-        if os.path.exists(status_file):
-            with open(status_file, 'r', encoding='utf-8') as f:
-                status_data = json.load(f)
-                
-            for worker_id, messages in status_data.items():
-                if messages:  # Nếu có message
-                    last_message_time = datetime.fromisoformat(messages[-1]['timestamp'])
-                    # Kiểm tra hoạt động trong 2 phút qua
-                    if (current_time - last_message_time) <= timedelta(minutes=2):
-                        active_workers += 1
-                    else:
-                        stopped_workers += 1
-                        
-    except Exception as e:
-        print(f"Lỗi khi kiểm tra trạng thái worker: {str(e)}")
-        
-    return active_workers, stopped_workers 
-    
-def print_with_activity_update(instance, message, output_dir):
-    """In message và lưu trạng thái worker"""
-    print(f"[Worker {instance.worker_id}] {message}")
-    save_worker_status(instance.worker_id, message, output_dir)
 
 def main():
-    input_file = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\Keyword.txt'
-    output_dir = r'C:\Users\Admin-DL\Downloads\Tìm Group Công Khai\output'
+    input_file = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\Keyword.txt'
+    output_dir = r'C:\Users\Admin\Downloads\Tìm Group Công Khai\output'
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -765,53 +669,10 @@ def main():
         ChromeInstance(debug_port=9224, worker_id=3),
         ChromeInstance(debug_port=9225, worker_id=4),
         ChromeInstance(debug_port=9226, worker_id=5),
-        ChromeInstance(debug_port=9227, worker_id=6),
-        ChromeInstance(debug_port=9228, worker_id=7),
-        ChromeInstance(debug_port=9229, worker_id=8),
-        ChromeInstance(debug_port=9230, worker_id=9),
-        ChromeInstance(debug_port=9231, worker_id=10)
+        ChromeInstance(debug_port=9227, worker_id=6)
     ]
 
     lock = threading.Lock()
-    
-    # Khởi tạo thời gian cho việc gửi báo cáo
-    last_report_time = datetime.now()
-    
-    # Thread riêng để theo dõi và báo cáo trạng thái worker
-    def monitor_workers(output_dir):
-        """Thread riêng để theo dõi và báo cáo trạng thái worker"""
-        # Đợi 1 phút đầu tiên
-        time.sleep(60)
-        
-        # Gửi thông báo đầu tiên sau 1 phút
-        active_workers, stopped_workers = check_workers_status(output_dir)
-        message = (
-            f"May 23: Hiện tại đang có {active_workers} worker làm việc, "
-            f"{stopped_workers} worker bị dừng"
-        )
-        send_telegram_message(message)
-        
-        # Cập nhật thời gian báo cáo cuối
-        last_report_time = datetime.now()
-        
-        while True:
-            current_time = datetime.now()
-            
-            # Gửi báo cáo mỗi 30 phút
-            if current_time - last_report_time >= timedelta(minutes=30):
-                active_workers, stopped_workers = check_workers_status(output_dir)
-                message = (
-                    f"May 23: Hiện tại đang có {active_workers} worker làm việc, "
-                    f"{stopped_workers} worker bị dừng"
-                )
-                send_telegram_message(message)
-                last_report_time = current_time
-                
-            time.sleep(60)  # Kiểm tra mỗi phút
-
-    # Khởi động thread monitor
-    monitor_thread = threading.Thread(target=monitor_workers, args=(output_dir,), daemon=True)
-    monitor_thread.start()
 
     threads = []
     for chrome_instance in chrome_instances:
