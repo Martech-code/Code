@@ -82,17 +82,17 @@ class FacebookAdsLibrary:
         print("Buffer flushed successfully")
     
     def simulate_human_scroll(self, start_y, end_y, duration=1.0):
-        """
-        Mô phỏng cuộn chuột tự nhiên của người dùng với khoảng scroll từ 100-800px.
-        """
-        print(f"Simulating human scroll from {start_y}")
+        """Mô phỏng cuộn chuột tự nhiên của người dùng với khoảng cách scroll từ 200-800px."""
+        print(f"Simulating human scroll from {start_y} to {end_y}")
         
-        # Tính toán khoảng scroll ngẫu nhiên từ 300-800px
-        scroll_distance = random.uniform(300, 800)
-        end_y = start_y + scroll_distance
+        # Tính toán khoảng cách scroll thực tế (random từ 200-800px)
+        scroll_distance = random.uniform(200, 800)
+        
+        # Đảm bảo không scroll quá end_y
+        target_y = min(start_y + scroll_distance, end_y)
         
         steps = int(duration * 60)  # 60 bước mỗi giây
-        step_y = scroll_distance / steps
+        step_y = (target_y - start_y) / steps
         
         current_y = start_y
         for _ in range(steps):
@@ -100,15 +100,12 @@ class FacebookAdsLibrary:
             random_offset = random.uniform(-1, 1)
             current_y += step_y + random_offset
             
-            # Đảm bảo không vượt quá khoảng scroll đã định
-            current_y = min(current_y, start_y + scroll_distance)
+            # Đảm bảo không scroll quá target_y
+            current_y = min(current_y, target_y)
             
             self.driver.execute_script(f"window.scrollTo(0, {current_y});")
             # Thêm độ trễ ngẫu nhiên giữa các bước
             time.sleep(random.uniform(0.01, 0.03))
-            
-        print(f"Completed scroll to {current_y} (scrolled {scroll_distance:.2f}px)")
-        return current_y  # Trả về vị trí cuối cùng sau khi scroll
             
     def close_block_popup(self):
         try:
